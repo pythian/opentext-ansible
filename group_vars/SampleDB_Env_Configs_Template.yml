@@ -96,7 +96,7 @@ redologsize:                      50 # in Mb
 #-- New_Database.dbt allows customization
 oracle_template:                 "New_Database.dbt" 
 #-- Database Domain Name
-db_domain:                       "hub" ## "covisint.net"
+db_domain:                       "hub" 
 #-- Database Configuration Type, for opentext always use SI unless GI/RAC required
 #-- But this ansible play does not handle GI/RAC
 db_config_type:                  "SI"  ## Single
