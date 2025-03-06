@@ -1,0 +1,24 @@
+#!/bin/sh -e
+## observer{{ database_name }}.sh
+export ORAENV_ASK=NO
+export ORACLE_HOME={{observer_oracle_home}}
+export LD_LIBRARY_PATH=$ORACLE_HOME/lib:$ORACLE_HOME/network/lib
+export PATH=$ORACLE_HOME/bin:$PATH
+export TNS_ADMIN={{ observer_tns_dir }}
+
+case $1 in
+        'start')
+        nohup dgmgrl -logfile {{ observer_script_dir }}/observer{{ database_name }}.log  sys/{{ sysPassword }}@{{ hostvars[groups['primary'][0]].database_unique_name }} "start observer file={{ observer_script_dir }}/fsfo_{{ database_name }}.dat" &
+        ;;
+        'stop')
+        nohup dgmgrl -logfile {{ observer_script_dir }}/observer{{ database_name }}.log  sys/{{ sysPassword }}@{{ hostvars[groups['primary'][0]].database_unique_name }} "stop observer {{ inventory_hostname }} " &
+        ;;
+        'status')
+        dgmgrl  sys/{{ sysPassword }}@{{ hostvars[groups['primary'][0]].database_unique_name }} "show fast_start failover"
+        ;;
+        *)
+        echo "usage: $0 {start|stop|status}"
+        ;;
+esac
+
+

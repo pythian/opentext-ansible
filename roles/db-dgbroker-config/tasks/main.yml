@@ -1,0 +1,338 @@
+---
+- name: db-dgbroker-config  | display pre dataguard broker and fsfo configuration message
+  remote_user: "{{ root_user }}"
+  debug:
+    msg:
+      - 'Dataguard Broker and FSFO Configuration tasks started at {{ansible_date_time.iso8601}}:'
+
+- name: db-dgbroker-config | Get DG details from primary 
+  remote_user: "{{ root_user }}"
+  become: yes
+  become_user: oracle
+  shell: |
+    export ORACLE_SID={{ database_unique_name }}
+    export ORACLE_HOME={{ oracle_home }}; 
+    export PATH=$PATH:$ORACLE_HOME/bin;
+    sqlplus -s / as sysdba <<EOF
+    SET HEADING OFF;
+    SET FEEDBACK OFF;
+    SELECT TRIM(DB_UNIQUE_NAME) FROM V\$DATAGUARD_CONFIG WHERE DB_UNIQUE_NAME IS NOT NULL;
+    EXIT;
+    EOF
+  register: existing_standbys
+  ignore_errors: yes
+  tags: db-dgbroker-config
+  when: inventory_hostname in groups['primary']
+
+# Display existing standby DB details
+- name: db-dgbroker-config | Debug standby_status
+  debug:
+    var: existing_standbys.stdout_lines
+  when: inventory_hostname in groups['primary']  
+
+# Exclude hosts that already has standby database 
+- name: db-dgbroker-config | Gather eligible standby servers (not in Data Guard config)
+  set_fact:
+    eligible_standbys: "{{ groups['standby'] | difference(existing_standbys.stdout_lines) }}"
+  when: inventory_hostname in groups['primary']  
+
+# Display eligible hosts for  standby database , variable  eligible_standbys  is set on primary 
+- name: db-dgbroker-config | display eligbile standbys names
+  debug:
+    var: hostvars[groups['primary'][0]].eligible_standbys
+  ignore_errors: yes 
+
+# If any standby db/host is down, exlcude from eligible_standbys 
+- name: db-dgbroker-config | Identify reachable standby servers
+  set_fact:
+    reachable_standbys: "{{ hostvars[groups['primary'][0]].eligible_standbys | select('in', ansible_play_hosts) | list }}"
+
+- name: db-dgbroker-config | Debug reachable standbys
+  debug:
+    msg: "Reachable Standbys: {{ reachable_standbys }}"  
+
+- name: db-dgbroker-config | Gather primary and standby hosts dynamically
+  set_fact:
+    primary_host: "{{ groups['primary'][0] }}" 
+    #standby_hosts: "{{ hostvars[groups['primary'][0]].eligible_standbys }}"
+    standby_hosts: "{{  groups['standby'] }}"
+    
+- name: db-dgbroker-config | Build TNS entries for primary and standby hosts
+  set_fact:
+    tns_entries: |
+          {% for item in [primary_host] + standby_hosts %}
+          {{ hostvars[item].database_unique_name }} =
+            (DESCRIPTION =
+              (ADDRESS_LIST =
+                (ADDRESS = (PROTOCOL = TCP)(HOST = {{ hostvars[item].ansible_host }})(PORT = {{ hostvars[item].listener_port }} ))
+              )
+              (CONNECT_DATA =
+                (SERVICE_NAME = {{ hostvars[item].database_unique_name }}.{{ hostvars[item].db_domain }})
+                (SID = {{ hostvars[item].database_unique_name }})
+              )
+            )
+          {% endfor %}
+
+- name: db-dgbroker-config | Append template content to TNS file (Create if missing)
+  ansible.builtin.blockinfile:
+    path: "{{ oracle_home }}/network/admin/tnsnames.ora"
+    block: "{{ lookup('template', 'tns_template.j2')| trim  }}"
+    marker: "# ANSIBLE MANAGED BLOCK for {{ database_name }}"
+    insertafter: EOF  # Ensures it is appended at the end of the file
+    create: yes  # Ensures the file is created if missing  
+    state: present   
+    mode: u=rw,g=r,o=
+    owner: "{{ oracle_user }}"
+    group: "{{ oracle_install_group }}"
+    backup: true
+  become: true
+  become_user: "{{ oracle_user }}"    
+  when: 
+    -  inventory_hostname in groups['primary'] or inventory_hostname in groups['standby'] 
+  register: append_result  
+
+
+- name: db-dgbroker-config | Create required directory for observer if not exists already
+  become: true
+  become_user: "{{ observer_user }}"    
+  when: 
+    -  inventory_hostname in groups['observer']       
+  register: append_result  
+  file:
+    path="{{ item }}"
+    state=directory
+    owner="{{ oracle_user }}"
+    group="{{ oracle_install_group }}"
+    mode=0775
+  with_items:
+    - "{{ observer_script_dir }}"  
+    - "{{ observer_tns_dir }}"  
+  tags:
+   - db_createinventory
+
+- name: db-dgbroker-config | Append template content to observer TNS file (Create if missing)
+  ansible.builtin.blockinfile:
+    path: "{{ observer_tns_dir }}/tnsnames.ora"
+    block: "{{ lookup('template', 'tns_template.j2')| trim  }}"
+    marker: "# ANSIBLE MANAGED BLOCK for {{ database_name }}"
+    insertafter: EOF  # Ensures it is appended at the end of the file
+    create: yes  # Ensures the file is created if missing  
+    state: present   
+    mode: u=rw,g=r,o=
+    owner: "{{ observer_user }}"
+    group: "{{ observer_install_group }}"
+    backup: true
+  become: true
+  become_user: "{{ observer_user }}"    
+  when: 
+    -  inventory_hostname in groups['observer']       
+  register: append_result  
+
+- name: db-dgbroker-config | Copy DG observer template
+  become: true
+  become_user: "{{ observer_user }}"  
+  when: 
+    -  fsfo_enabled
+    -  hostvars[groups['primary'][0]].fsfo_target is defined and hostvars[groups['primary'][0]].fsfo_target | length > 0
+    -  inventory_hostname in groups['observer']     
+  template:
+    src: dg_observer.sh.j2
+    dest: "{{ observer_script_dir }}/observer{{database_name}}.sh"
+    owner: "{{ observer_user }}"
+    group: "{{ observer_install_group }}"
+    mode: '0775'
+
+#- name: db-dgbroker-config | Copy TNS template to all primary and standby servers
+#  template:
+#    src: tns_template.j2
+#    dest: "{{ oracle_home }}/network/admin/tnsnames.ora"
+#    owner: "{{ oracle_user }}"
+#    group: "{{ oracle_install_group }}"
+#    mode: '0644'
+#    backup: yes
+  #when: 
+  #  - inventory_hostname in groups['primary'] 
+  #    or inventory_hostname in (hostvars[groups['primary'][0]].eligible_standbys | list)
+
+
+    
+- name: db-dgbroker-config | Check if DG Broker configuration exists on primary
+  when: inventory_hostname in groups['primary']
+  become: true
+  become_user: "{{ oracle_user }}"  
+  shell: |
+      set -o pipefail
+      export ORACLE_SID={{ database_unique_name }}
+      export ORACLE_HOME={{ oracle_home }}
+      export PATH={{ oracle_home }}/bin:${PATH}
+      echo "SHOW CONFIGURATION;" | ${ORACLE_HOME}/bin/dgmgrl /
+  register: dg_status
+  changed_when: false
+  ignore_errors: true  # Avoid playbook failure if config does not exist
+
+
+- name: db-dgbroker-config | dg_status output
+  when: inventory_hostname in groups['primary']
+  debug:
+    msg:
+      - "{{ dg_status.stdout_lines }}"
+
+
+- name: db-dgbroker-config | Create DG Broker configuration in primary, if not exists already
+  when: 
+    -  inventory_hostname in groups['primary'] 
+    -  "'ORA-16532' in dg_status.stdout" ## or 'ORA-' in dg_status.stdout" 
+  become: true
+  become_user: "{{ oracle_user }}"      
+  shell: |
+      set -o pipefail
+      export ORACLE_SID={{ database_unique_name }}
+      export ORACLE_HOME={{ oracle_home }}
+      export PATH={{ oracle_home }}/bin:${PATH}
+      echo "CREATE CONFIGURATION '{{ database_name }}_fsfo_config' AS PRIMARY DATABASE IS '{{ database_unique_name }}'  CONNECT IDENTIFIER IS '{{ database_unique_name }}' ;" | ${ORACLE_HOME}/bin/dgmgrl /
+      echo "ENABLE CONFIGURATION;" | ${ORACLE_HOME}/bin/dgmgrl /
+  ignore_errors: false 
+  register: dg_create
+
+- name: db-dgbroker-config | dg_create output
+  when: inventory_hostname in groups['primary']
+  debug:
+    msg:
+      - "{{ dg_create }}"
+    
+- name: db-dgbroker-config | Add standby database to DG Broker configuration from primary
+  become: true
+  become_user: "{{ oracle_user }}"  
+  when: 
+    -  inventory_hostname in groups['primary'] 
+    -  eligible_standbys | length > 0
+  shell: |
+      set -o pipefail
+      export ORACLE_SID={{ database_unique_name }}
+      export ORACLE_HOME={{ oracle_home }}
+      export PATH={{ oracle_home }}/bin:${PATH}
+      echo "ADD DATABASE '{{ hostvars[item].database_unique_name }}' AS CONNECT IDENTIFIER IS '{{ hostvars[item].database_unique_name }}' MAINTAINED AS PHYSICAL;" | ${ORACLE_HOME}/bin/dgmgrl /  
+      echo "ENABLE DATABASE '{{ hostvars[item].database_unique_name }}';" | ${ORACLE_HOME}/bin/dgmgrl /   
+  #loop: "{{ hostvars[groups['primary'][0]].eligible_standbys }}"      
+  loop:  "{{ eligible_standbys }} "
+  register: dg_config_add_standby
+  failed_when: 
+    - "'Error' in dg_config_add_standby.stdout_lines"
+  ignore_errors: false 
+
+- name: db-dgbroker-config | dg_config_add_standby output
+  when: inventory_hostname in groups['primary']
+  debug:
+    msg:
+      - "{{ dg_config_add_standby }}"
+
+- name: db-dgbroker-config | Set FSFO Target for Primary
+  become: true
+  become_user: "{{ oracle_user }}"  
+  when: 
+    -  inventory_hostname in groups['primary'] or inventory_hostname in groups['standby']
+    -  fsfo_enabled
+    -  fsfo_target is defined and fsfo_target | length > 0
+  shell: |
+      set -o pipefail
+      export ORACLE_SID={{ database_unique_name }}
+      export ORACLE_HOME={{ oracle_home }}
+      export PATH={{ oracle_home }}/bin:${PATH}
+      ${ORACLE_HOME}/bin/dgmgrl /  <<EOF
+      EDIT DATABASE '{{ database_unique_name }}' SET PROPERTY FastStartFailoverTarget = '{{ fsfo_target }}';      
+      EDIT DATABASE '{{ database_unique_name }}' SET PROPERTY LogXptMode=SYNC;
+      EXIT;
+      EOF
+  ignore_errors: false     
+    
+
+- name: db-dgbroker-config | Set FSFO configs and enable
+  become: true
+  become_user: "{{ oracle_user }}"  
+  when: 
+    -  inventory_hostname in groups['primary'] 
+    -  fsfo_enabled
+    -  fsfo_target is defined and fsfo_target | length > 0
+  shell: |
+      set -o pipefail
+      export ORACLE_SID={{ database_unique_name }}
+      export ORACLE_HOME={{ oracle_home }}
+      export PATH={{ oracle_home }}/bin:${PATH}
+      ${ORACLE_HOME}/bin/dgmgrl /  <<EOF
+      EDIT CONFIGURATION SET PROTECTION MODE AS {{ fsfo_protection_mode }};
+      EDIT CONFIGURATION SET PROPERTY FASTSTARTFAILOVERLAGLIMIT=30;
+      EDIT CONFIGURATION SET PROPERTY FASTSTARTFAILOVERTHRESHOLD = 30;
+      EDIT CONFIGURATION SET PROPERTY FASTSTARTFAILOVERPMYSHUTDOWN = TRUE;
+      EDIT CONFIGURATION SET PROPERTY FASTSTARTFAILOVERAUTOREINSTATE = TRUE;
+      ENABLE FAST_START FAILOVER;      
+      EXIT;
+      EOF
+  ignore_errors: false     
+
+- name: db-dgbroker-config | Start FSFO Observer
+  become: true
+  become_user: "{{ observer_user }}"  
+  shell: |
+    set -o pipefail
+    {{ observer_script_dir }}/observer{{database_name}}.sh start > {{ observer_script_dir }}/observer{{database_name}}.log 2>&1 &
+  register: dg_config_stat_observer
+  when: 
+    -  fsfo_enabled
+    -  hostvars[groups['primary'][0]].fsfo_target is defined and hostvars[groups['primary'][0]].fsfo_target | length > 0
+    -  inventory_hostname in groups['observer'] 
+  ignore_errors: false 
+
+- name: db-dgbroker-config | dg_config_stat_observer output
+  when: inventory_hostname in groups['observer']
+  debug:
+    msg:
+      - "{{ dg_config_stat_observer }}"
+
+- name: db-dgbroker-config | Pause for 10 seconds 
+  pause:
+    seconds: 10
+
+
+- name: db-dgbroker-config | Copy show DG config template
+  become: true
+  become_user: "{{ oracle_user }}"  
+  when: 
+    -  inventory_hostname in groups['primary'] 
+  template:
+    src: show_dg.sh.j2
+    dest: "{{ stage_dir }}/show_dg.sh"
+    owner: "{{ oracle_user }}"
+    group: "{{ oracle_install_group }}"
+    mode: '0775'
+
+
+- name: db-dgbroker-config | Get DG configuration
+  become: true
+  become_user: "{{ oracle_user }}"  
+  when: 
+    -  inventory_hostname in groups['primary']  
+  shell: |
+      sh {{ stage_dir }}/show_dg.sh
+      rm {{ stage_dir }}/show_dg.sh
+  register: dg_config
+
+- name: db-dgbroker-config | Apply masking to sensitive values
+  when: inventory_hostname in groups['primary']
+  set_fact:
+    masked_output: >-
+      {{ dg_config.stdout_lines  
+         | map('regex_replace', systemPassword, '******') 
+         | map('regex_replace', sysPassword, '******') 
+         | list 
+      }}
+
+- name: db-dgbroker-config | Display cleaned & masked output
+  when: masked_output is defined
+  debug:
+    msg: "{{ masked_output }}"
+
+- name: db-dgbroker-config | display post dgbroker config message
+  debug:
+    msg:
+      - '##### DataGuard Broker and FSFO tasks completed at {{ansible_date_time.iso8601}}: #####'
+      

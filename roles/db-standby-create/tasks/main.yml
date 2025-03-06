@@ -1,0 +1,176 @@
+---
+- name: db-standby-create  | display pre oracle standby db create message
+  remote_user: "{{ root_user }}"
+  debug:
+    msg:
+      - 'Oracle Standby Database verification and create tasks started at {{ansible_date_time.iso8601}}:'
+
+# Get standby DB details from Primary DB server 
+- name: db-standby-create | Get DG details from primary 
+  remote_user: "{{ root_user }}"
+  become: yes
+  become_user: oracle
+  shell: |
+    export ORACLE_SID={{ database_unique_name }}
+    export ORACLE_HOME={{ oracle_home }}; 
+    export PATH=$PATH:$ORACLE_HOME/bin;
+    sqlplus -s / as sysdba <<EOF
+    SET HEADING OFF;
+    SET FEEDBACK OFF;
+    SELECT TRIM(DB_UNIQUE_NAME) FROM V\$DATAGUARD_CONFIG WHERE DB_UNIQUE_NAME IS NOT NULL;
+    EXIT;
+    EOF
+  register: existing_standbys
+  ignore_errors: yes
+  tags: db-sby-create
+  when: inventory_hostname in groups['primary']
+
+# Display existing standby DB details
+- name: db-standby-create | Debug standby_status
+  debug:
+    var: existing_standbys.stdout_lines
+  when: inventory_hostname in groups['primary']  
+
+# Exclude hosts that already has standby database 
+- name: db-standby-create | Gather eligible standby servers (not in Data Guard config)
+  set_fact:
+    eligible_standbys: "{{ groups['standby'] | difference(existing_standbys.stdout_lines) }}"
+  when: inventory_hostname in groups['primary']  
+
+# Display eligible hosts for  standby database , variable  eligible_standbys  is set on primary 
+- name: db-standby-create | display eligbile standbys names
+  debug:
+    var: hostvars[groups['primary'][0]].eligible_standbys
+  ignore_errors: yes 
+
+# If any standby db/host is down, exlcude from eligible_standbys 
+- name: db-standby-create | Identify reachable standby servers
+  set_fact:
+    reachable_standbys: "{{ hostvars[groups['primary'][0]].eligible_standbys | select('in', ansible_play_hosts) | list }}"
+
+- name: db-standby-create | Debug reachable standbys
+  debug:
+    msg: "Reachable Standbys: {{ reachable_standbys }}"  
+
+- name: db-standby-create | Test whether pmon process by same name already exists
+  shell: "set -o pipefail; ps -ef | ( grep pmon || true ) | ( grep -i {{ database_unique_name }} || true ) | ( grep -v grep || true ) | wc -l"
+  changed_when: false
+  register: pmon_proc
+  #when: inventory_hostname in groups['standby']  
+  tags: db-sby-create
+
+- name: db-standby-create | Check if database is already in oratab
+  shell: "set -o pipefail; ( grep -i {{ database_unique_name }}: /etc/oratab || true ) | wc -l"
+  changed_when: false
+  register: check_oratab
+  #when: inventory_hostname in groups['standby']  
+  tags: db-sby-create
+
+- name: db-standby-create | Standby Database exists check results
+  debug:
+    msg: 
+    - " Check whether pmon or oratab already exists, if any exists skip standby DB creation"
+    - "{{ item }}"
+    verbosity: 1
+  with_items:
+    - "{{ pmon_proc }}"
+    - "{{ check_oratab }}"
+  when: inventory_hostname in groups['standby']    
+  tags: db-sby-create
+
+- name: db-standby-create | Add listener name to tnsnames.ora
+  ansible.builtin.lineinfile:
+    path: "{{ oracle_home }}/network/admin/tnsnames.ora"
+    line: "{{ item }}"
+    insertafter: EOF  
+    create: yes  
+    state: present 
+  loop:
+      - "{{ listener_name }} = (DESCRIPTION_LIST = (DESCRIPTION = (ADDRESS = (PROTOCOL = TCP)(HOST = {{ ansible_hostname }}.{{ db_domain }})(PORT = {{ listener_port }} ))))"
+
+# Dispaly sample DBCA create database command
+- name: db-standby-create | Print dbca command to be run on standby db_servers 
+  debug:
+    msg : 
+      - "dbca -silent -createDuplicateDB -gdbName {{database_name}} -sid {{ hostvars[item]['database_unique_name'] }}  -createAsStandby -dbUniqueName {{ hostvars[item]['database_unique_name'] }} -sysPassword ********* -recoveryAreaSize {{ recoveryareasize }} -datafileDestination {{ db_datafiles_dir }}  -primaryDBConnectionString {{ hostvars[groups['primary'][0]].ansible_host }}:{{ listener_port }}/{{ hostvars[groups['primary'][0]].database_unique_name }}.{{ db_domain }} -initParams dg_broker_start={{dg_broker_start}},standby_file_management={{ standby_file_management }},db_create_file_dest='{{ db_datafiles_dir }}',streams_pool_size=64M,use_large_pages=TRUE,db_domain='{{ db_domain }}',diagnostic_dest='{{ oracle_base }}'"
+  loop: "{{ hostvars[groups['primary'][0]].eligible_standbys }}"
+  tags: db-sby-create
+  when: create_standby_db and inventory_hostname == item and pmon_proc.stdout == "0" and check_oratab.stdout == "0"
+
+# DBCA executed only from eligible standy DB servers that does not have standby DB already
+- name: db-standby-create | Create Standby database using DBCA 
+  ignore_errors: False
+  block:
+    - name: db-standby-create | Run DBCA
+      become: true
+      become_user: "{{ oracle_user }}"
+      shell: |
+        set -o pipefail
+        export PATH={{ oracle_home }}/bin:${PATH}
+        dbca -silent -createDuplicateDB -gdbName {{database_name}} -sid {{ hostvars[item]['database_unique_name'] }}  -createAsStandby -dbUniqueName {{ hostvars[item]['database_unique_name'] }} -sysPassword {{ sysPassword }} -recoveryAreaSize {{ recoveryareasize }} -datafileDestination {{ db_datafiles_dir }}  -primaryDBConnectionString {{ hostvars[groups['primary'][0]].ansible_host }}:{{ listener_port }}/{{ hostvars[groups['primary'][0]].database_unique_name }}.{{ db_domain }} -initParams dg_broker_start={{dg_broker_start}},standby_file_management={{ standby_file_management }},db_create_file_dest='{{ db_datafiles_dir }}',streams_pool_size=64M,use_large_pages=TRUE,db_domain='{{ db_domain }}',diagnostic_dest='{{ oracle_base }}',local_listener='{{ listener_name }}'
+      register: dbca_output
+      failed_when: "'Post duplicate database operations' not in dbca_output.stdout and 'DBCA_PROGRESS : 100%' not in dbca_output.stdout"
+      loop: "{{ hostvars[groups['primary'][0]].eligible_standbys }}"
+      tags: db-sby-create
+      when: create_standby_db and inventory_hostname == item and pmon_proc.stdout == "0" and check_oratab.stdout == "0"
+  rescue:
+    - name: db-standby-create | Retrieve DBCA logs
+      slurp:
+        src: "{{ oracle_base }}/cfgtoollogs/dbca/{{ database_name }}/{{ database_name }}.log"
+      register: dbcalog
+    - debug:
+        msg: "{{ dbcalog['content'] | b64decode }}"
+
+- name: db-standby-create | DBCA output
+  debug:
+    msg:
+      - "{{ dbca_output }}"
+    # verbosity: 1
+  loop: "{{ hostvars[groups['primary'][0]].eligible_standbys }}"    
+  when: inventory_hostname == item and pmon_proc.stdout == "0" and check_oratab.stdout == "0"
+  tags: db-sby-create
+
+- name: db-standby-create | Enable Logging on new standby 
+  become: true
+  become_user: "{{ oracle_user }}"
+  shell: |
+        set -o pipefail
+        export PATH={{ oracle_home }}/bin:${PATH}
+        export ORACLE_HOME={{ oracle_home }}
+        export ORACLE_SID={{ database_unique_name }}
+        $ORACLE_HOME/bin/sqlplus "/as sysdba" << EOF
+        ALTER DATABASE FORCE LOGGING;
+        ALTER SYSTEM SET local_listener='{{ listener_name }}';
+        ALTER DATABASE FLASHBACK ON;        
+        exit;
+        EOF
+  register: result
+  tags: db-sby-create
+  when: inventory_hostname in groups['standby'] and pmon_proc.stdout == "0" and check_oratab.stdout == "0" 
+  ignore_errors: False
+
+- name: db-standby-create | Restart new standby to disable active data guard, if needed
+  become: true
+  become_user: "{{ oracle_user }}"
+  shell: |
+        set -o pipefail
+        export PATH={{ oracle_home }}/bin:${PATH}
+        export ORACLE_HOME={{ oracle_home }}
+        export ORACLE_SID={{ database_unique_name }}
+        $ORACLE_HOME/bin/sqlplus "/as sysdba" << EOF
+        SHUTDOWN IMMEDIATE;
+        exit;
+        EOF
+        $ORACLE_HOME/bin/sqlplus "/as sysdba" << EOF
+        STARTUP MOUNT;
+        exit;
+        EOF
+  register: result
+  tags: db-sby-create
+  when: inventory_hostname in groups['standby'] and pmon_proc.stdout == "0" and check_oratab.stdout == "0" and not active_data_guard 
+  ignore_errors: False  
+
+- name: db-standby-create | display post standby db create message
+  debug:
+    msg:
+      - '##### Create Standby Database completed at {{ansible_date_time.iso8601}}: #####'

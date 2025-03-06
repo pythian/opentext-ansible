@@ -1,0 +1,38 @@
+
+
+{{ listener_name }} =
+  (DESCRIPTION_LIST =
+    (DESCRIPTION =
+      (ADDRESS = (PROTOCOL = TCP)(HOST = {{ ansible_hostname }}.{{ db_domain }})(PORT = {{ listener_port }} ))
+    )
+  )
+
+SID_LIST_{{ listener_name }} =
+  (SID_LIST =
+    (SID_DESC =
+      (GLOBAL_DBNAME = {{ database_name }}.{{ db_domain }} )
+      (ORACLE_HOME = {{ oracle_home }} )
+      (SID_NAME = {{ database_unique_name }} )
+      (SERVICE_NAME = {{ database_unique_name }}.{{ db_domain }}  )
+      (SERVICE_NAME = {{ database_unique_name }}  )
+    )
+  )
+
+# to prevent Listener from hanging periodically.
+SUBSCRIBE_FOR_NODE_DOWN_EVENT_{{ listener_name }} = OFF
+
+# For RAC, to allow the listener to accept connections for pre-11.2 
+# databases which did not register the dynamic endpoint.
+ENABLE_GLOBAL_DYNAMIC_ENDPOINT_{{ listener_name }} = ON           # line added by Agent
+
+# Disabling logging, used when non-ADR tracing is used
+# LOGGING_{{ listener_name }}  = OFF       # def = ON
+# TRACE_LEVEL_{{ listener_name }}  = OFF   # def = OFF
+
+
+# reverting to the to Old-Style Tracing and Logging 
+# Disabling the Automatic Diagnostic Repository adrci
+# DIAG_ADR_ENABLED_{{ listener_name }} =OFF  # reverting to the to Old-Style Tracing and Logging 
+
+#ADR_BASE_{{ listener_name }}  =/db_backup
+VALID_NODE_CHECKING_REGISTRATION_{{ listener_name }} =ON       

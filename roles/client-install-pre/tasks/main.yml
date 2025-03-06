@@ -1,0 +1,242 @@
+---
+- name: client-install-pre | display pre client software install message
+  remote_user: "{{ observer_root_user }}"
+  debug:
+    msg:
+      - 'Oracle Client Software Installation Pre validations tasks started  at {{ansible_date_time.iso8601}}:'
+
+- name: client-install-pre | Print OS Release Version
+  ansible.builtin.debug:
+    msg: 
+    - "Release : {{ ansible_facts['distribution'] }}"
+    - "Release Version : {{ ansible_facts['distribution_version'] }}"
+
+- name: client-install-pre | Check OS Release Version
+  assert:
+    that:
+        - ansible_distribution_major_version | int  ==  observer_os_major_version | int 
+    msg: "warning: OS Major version does meet the criteria ( expected   {{ observer_os_major_version }} , curret  {{ ansible_distribution_major_version }} ) "
+
+
+- name: client-install-pre | Print Available Memory
+  ansible.builtin.debug:
+    msg: 
+    - "Total Memory in MB : {{ ansible_facts['memtotal_mb'] }}"
+
+- name: client-install-pre | Check Available Memory
+  assert:
+    that:
+        - ansible_memtotal_mb | int  >=  observer_min_memory_in_mb | int 
+
+- name: client-install-pre | Print Swap Space
+  ansible.builtin.debug:
+    msg: 
+    - "Total Swap in MB : {{ ansible_facts.swaptotal_mb }}"
+
+- name: client-install-pre | Check Swap size
+  assert:
+    that:
+        - ansible_facts.swaptotal_mb | int  >=  observer_min_swap_in_mb | int 
+    msg: "warning: Swap space is low ( expected  > {{ observer_min_swap_in_mb }} MB, available  {{ ansible_facts.swaptotal_mb }} MB ) "
+
+- name: client-install-pre | Print CPU details
+  ansible.builtin.debug:
+    msg: 
+    - "processor_cores : {{ ansible_facts['processor_cores'] }}"
+    - "processor_count : {{ ansible_facts['processor_count'] }}"
+    - "processor_threads_per_core : {{ ansible_facts['processor_threads_per_core'] }}"    
+
+
+- name: client-install-pre | create stage directory 
+  when: inventory_hostname in groups['observer']
+  remote_user: "{{ observer_root_user }}"
+  file:
+    path="{{ item }}"
+    state=directory
+    owner="{{ observer_root_user }}"
+    group="{{ observer_root_user }}"
+    mode=0775
+  with_items:
+    - "{{ observer_stage_dir }}"
+  tags:
+   - db_createinventory
+
+
+- name: client-install-pre | Copy Oracle preinstall package to target observer server
+  when: inventory_hostname in groups['observer']  
+  copy: src=roles/client-install-pre/files/{{ item }} dest={{ observer_stage_dir }} mode=0755 force=true  ## owner="{{ observer_oracle_user }}" group="{{ observer_oracle_install_group }} show_progress_bar=True"    
+  with_items:
+     - "{{ observer_preinstall_pkg }}"
+  tags:
+   - db_preinstpkg
+
+- name: client-install-pre | Execute pre install package using dnf
+  when: inventory_hostname in groups['observer'] and  ansible_pkg_mgr == 'dnf'  
+  remote_user: "{{ observer_root_user }}"
+  become: yes
+  ansible.builtin.dnf:
+      name: "/{{ observer_stage_dir }}/{{ observer_preinstall_pkg }}"
+      state: present
+      disable_gpg_check: yes
+
+
+- name: client-install-pre | Execute other pre install package using dnf 
+  when: inventory_hostname in groups['observer']
+  remote_user: "{{ observer_root_user }}"
+  become: yes
+  ansible.builtin.dnf:
+      name: "{{ item }}"
+      state: present
+  with_items:
+     - "{{ observer_preinstall_os_pkg }}"      
+
+
+
+- name: client-install-pre | create required directories
+  when: inventory_hostname in groups['observer']
+  remote_user: "{{ observer_root_user }}"
+  file:
+    path="{{ item }}"
+    state=directory
+    owner="{{ observer_oracle_user }}"
+    group="{{ observer_oracle_install_group }}"
+    mode=0775
+  with_items:
+    - "{{ observer_oracle_mount_dir }}"  
+    - "{{ observer_oracle_base }}"    
+    - "{{ observer_oracle_inventory }}"
+    - "{{ observer_stage_dir }}"
+    - "{{ observer_oracle_home }}"
+    - "{{ observer_oracle_patch_stage_dir }}"      
+    - "{{ observer_script_dir }}"   
+    - "{{ observer_tns_dir }}"           
+  tags:
+   - db_createinventory
+
+- name: client-install-pre | Get free space on disk for Client installation
+  shell: df -m {{ observer_oracle_home }} | awk 'NR>1{print $4}'
+  register: df_output
+
+- name: client-install-pre | Ensure free space on disk for Client installation
+  assert:
+    that: df_output.stdout | int > observer_min_orahome_diskspace_in_mb | int 
+    msg: "warning: disk free space is low ( expected  < {{ observer_min_orahome_diskspace_in_mb }} MB, available df_output.stdout MB  in {{ observer_oracle_home }} ) "
+
+
+
+- name: client-install-pre | Validate and Change Oracle user security limits
+  ansible.builtin.lineinfile:
+    path: /etc/security/limits.d/oracle-database-preinstall-19c.conf
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+    - { regexp: '^oracle   soft   nofile',  line: 'oracle   soft   nofile    131072' }
+    - { regexp: '^oracle   hard   nofile',  line: 'oracle   hard   nofile    131072' }
+    - { regexp: '^oracle   soft   nproc',   line: 'oracle   soft   nproc     131072' }
+    - { regexp: '^oracle   hard   nproc',   line: 'oracle   hard   nproc     unlimited' }
+    - { regexp: '^oracle   soft   stack',   line: 'oracle   soft   stack     10240' }
+    - { regexp: '^oracle   hard   stack',   line: 'oracle   hard   stack     32768' }
+    - { regexp: '^oracle   soft   memlock', line: 'oracle   soft   memlock   595576809000' }
+    - { regexp: '^oracle   hard   memlock', line: 'oracle   hard   memlock   674987050000' }
+    - { regexp: '^oracle   soft   data',    line: 'oracle   soft   data      unlimited' }
+    - { regexp: '^oracle   hard   data',    line: 'oracle   hard   data      unlimited' }
+
+- name: client-install-pre | Validate and Change sysctl configurations
+  ansible.builtin.lineinfile:
+    path: /etc/sysctl.d/99-oracle-database-preinstall-19c-sysctl.conf
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+    - { regexp: '^fs.file-max =',  line: 'fs.file-max = 6815744' }
+    - { regexp: '^kernel.sem =',  line: 'kernel.sem = 250 32000 100 128' }
+    - { regexp: '^kernel.shmmni =',   line: 'kernel.shmmni = 4096' }
+    - { regexp: '^kernel.shmall =',   line: 'kernel.shmall = 1073741824' }
+    - { regexp: '^kernel.shmmax =',   line: 'kernel.shmmax = 4398046511104' }
+    - { regexp: '^kernel.panic_on_oops =',   line: 'kernel.panic_on_oops = 1' }
+    - { regexp: '^net.core.rmem_default =', line: 'net.core.rmem_default = 262144' }
+    - { regexp: '^net.core.rmem_max =', line: 'net.core.rmem_max = 4194304' }
+    - { regexp: '^net.core.wmem_default =',    line: 'net.core.wmem_default = 262144' }
+    - { regexp: '^net.core.wmem_max =',    line: 'net.core.wmem_max = 1048576' }
+    - { regexp: '^net.ipv4.conf.all.rp_filter =',    line: 'net.ipv4.conf.all.rp_filter = 2' }    
+    - { regexp: '^net.ipv4.conf.default.rp_filter =',    line: 'net.ipv4.conf.default.rp_filter = 2' }
+    - { regexp: '^fs.aio-max-nr =',    line: 'fs.aio-max-nr = 1048576' }    
+    - { regexp: '^net.ipv4.ip_local_port_range =',    line: 'net.ipv4.ip_local_port_range = 9000 65500' }    
+
+- name: client-install-pre | configure memlock limits
+  pam_limits: domain=oracle limit_type={{ item }} limit_item=memlock value=unlimited
+  with_items:
+    - soft
+    - hard
+
+
+- name: client-install-pre | Copy Oracle Binaries to target observer server
+  when: inventory_hostname in groups['observer']  
+  copy: src=roles/client-install-pre/files/{{ item }} dest={{ observer_stage_dir }} mode=0755 force=true owner="{{ observer_oracle_user }}" group="{{ observer_oracle_install_group }}"    
+  with_items:
+     - "{{ observer_oracle_client_binary }}"
+     - "{{ observer_oracle_opatch_binary }}"
+     - "{{ observer_oracle_patch_binary }}"
+  tags:
+   - db_binary
+  ignore_errors: false 
+
+
+- name: client-install-pre | Unpack Oracle Client Binaries on the target server
+  when: inventory_hostname in groups['observer']
+  remote_user: "{{ observer_root_user }}"
+  become: yes
+  become_user: "{{ observer_oracle_user }}"
+  unarchive:
+     src={{ observer_stage_dir }}/{{ item }}
+     dest="{{ observer_oracle_home }}"
+     creates="{{ observer_oracle_client_binary_flagFile }}" 
+     remote_src=yes
+     mode=0775
+     group="{{ observer_oracle_install_group }}"
+     owner="{{ observer_oracle_user }}"
+  with_items:
+     - "{{ observer_oracle_client_binary }}"     
+  tags:
+   - db_unpackdbsoftware
+  ignore_errors: false   
+
+
+- name: client-install-pre | Unpack Oracle Patch Binaries on the target server
+  when: inventory_hostname in groups['observer']
+  remote_user: "{{ observer_root_user }}"
+  become: yes
+  become_user: "{{ observer_oracle_user }}"
+  unarchive:
+     src={{ observer_stage_dir }}/{{ item }}
+     dest="{{ observer_stage_dir }}"
+     creates="{{ observer_oracle_patch_flagFile }}" 
+     remote_src=yes     
+     mode=0775
+     group="{{ observer_oracle_install_group }}"
+     owner="{{ observer_oracle_user }}"
+  with_items:
+     - "{{ observer_oracle_patch_binary }}"     
+  tags:
+   - db_unpackdbsoftware
+  ignore_errors: false   
+
+
+#- name: client-install-pre | Remove copied Oracle Binaries from target database server to save space, just for lab env
+  #when: inventory_hostname in groups['observer']  
+  #file: 
+  #   path: "{{ observer_stage_dir }}/{{ item }}"
+  #   state: absent
+  #with_items:
+  #   - "{{ observer_oracle_client_binary }}"
+  #   - "{{ observer_oracle_patch_binary }}"
+  #tags:
+  # - db_binary
+  #ignore_errors: false 
+
+
+- name: client-install-pre | Should you install Oracle Cleint ?
+  ansible.builtin.debug:
+    msg: 
+    - ' *** Note *** If you are to install Oracle Client, please make sure '
+    - ' the flagfile {{ observer_oracle_installed_flagFile }} does not exists. If exists, Ansible will not install the Oracle Client '
+    - ' Pre install validations tasks completed at {{ansible_date_time.iso8601}}:'

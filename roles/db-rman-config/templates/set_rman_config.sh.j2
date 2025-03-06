@@ -1,0 +1,23 @@
+#!/bin/sh -e
+
+export ORAENV_ASK=NO
+export ORACLE_SID={{ database_unique_name }} 
+export ORACLE_HOME={{oracle_home}}
+export LD_LIBRARY_PATH=$ORACLE_HOME/lib
+export PATH=$ORACLE_HOME/bin:$PATH
+## Set RMAN Configs
+rman target / << END  | tee  rman_config_output.log
+SHOW  ALL;
+CONFIGURE DEFAULT DEVICE TYPE TO DISK;
+CONFIGURE CONTROLFILE AUTOBACKUP OFF;
+CONFIGURE DEVICE TYPE 'SBT_TAPE' PARALLELISM 1 BACKUP TYPE TO BACKUPSET;
+CONFIGURE DEVICE TYPE DISK PARALLELISM 3 BACKUP TYPE TO BACKUPSET;
+CONFIGURE CHANNEL DEVICE TYPE 'SBT_TAPE' PARMS  'BLKSIZE=1048576,ENV=(STORAGE_UNIT=ddboost_oracle, BACKUP_HOST=covdd01.covisint.com)' SEND  'set username ddbooster password ********* servername covdd01.covisint.com' MAXPIECESIZE 50 G MAXOPENFILES 32;
+CONFIGURE ARCHIVELOG DELETION POLICY TO APPLIED ON ALL STANDBY;
+CONFIGURE SNAPSHOT CONTROLFILE NAME TO '{{oracle_home}}/snapcf_{{ database_unique_name }}.f'; 
+SHOW  ALL;
+exit
+END
+exit
+
+

@@ -1,0 +1,30 @@
+#!/bin/sh -e
+## Show DG Broker Configuration and Standby DB Status of all running databases
+export ORAENV_ASK=NO
+export ORACLE_SID={{ database_unique_name }} 
+export ORACLE_HOME={{oracle_home}}
+export LD_LIBRARY_PATH=$ORACLE_HOME/lib
+export PATH=$ORACLE_HOME/bin:$PATH
+## Get DG broker details 
+dgmgrl  -silent -echo << END  | tee  dg_config_output.log
+connect /
+show configuration
+exit
+END
+for DB in `egrep 'Primary|Physical' dg_config_output.log |sort |awk -F" " '{print $3 $1}'`
+do
+if [ "`echo $DB|awk '{print substr($1,1,8)}'`" == "Physical" ]
+then
+ DBID=`echo $DB|awk '{print substr($1,9)}'`
+else
+  DBID=`echo $DB|awk '{print substr($1,8)}'`
+fi
+dgmgrl -silent  -echo << END  | tee dg_sby_db_output.log
+connect /
+show database $DBID
+exit
+END
+done 
+exit
+
+

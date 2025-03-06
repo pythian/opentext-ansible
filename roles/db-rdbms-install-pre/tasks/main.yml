@@ -1,0 +1,447 @@
+---
+- name: db-rdbms-install-pre | display pre database software install message
+  remote_user: "{{ root_user }}"
+  debug:
+    msg:
+      - 'Oracle RDBMS Software Installation Pre validations tasks started for Single Instance at {{ansible_date_time.iso8601}}:'
+
+- name: db-rdbms-install-pre | Print OS Release Version
+  ansible.builtin.debug:
+    msg: 
+    - "Release : {{ ansible_facts['distribution'] }}"
+    - "Release Version : {{ ansible_facts['distribution_version'] }}"
+
+- name: db-rdbms-install-pre | Check OS Release Version
+  assert:
+    that:
+        - ansible_distribution_major_version | int  ==  os_major_version | int 
+    msg: "warning: OS Major version does meet the criteria ( expected   {{ os_major_version }} , curret  {{ ansible_distribution_major_version }} ) "
+
+
+- name: db-rdbms-install-pre | Print Available Memory
+  ansible.builtin.debug:
+    msg: 
+    - "Total Memory in MB : {{ ansible_facts['memtotal_mb'] }}"
+
+- name: db-rdbms-install-pre | Check Available Memory
+  assert:
+    that:
+        - ansible_memtotal_mb | int  >=  min_memory_in_mb | int 
+
+- name: db-rdbms-install-pre | Print Swap Space
+  ansible.builtin.debug:
+    msg: 
+    - "Total Swap in MB : {{ ansible_facts.swaptotal_mb }}"
+
+- name: db-rdbms-install-pre | Check Swap size
+  assert:
+    that:
+        - ansible_facts.swaptotal_mb | int  >=  min_swap_in_mb | int 
+    msg: "warning: Swap space is low ( expected  > {{ min_swap_in_mb }} MB, available  {{ ansible_facts.swaptotal_mb }} MB ) "
+
+- name: db-rdbms-install-pre | Print CPU details
+  ansible.builtin.debug:
+    msg: 
+    - "processor_cores : {{ ansible_facts['processor_cores'] }}"
+    - "processor_count : {{ ansible_facts['processor_count'] }}"
+    - "processor_threads_per_core : {{ ansible_facts['processor_threads_per_core'] }}"    
+
+
+- name: db-rdbms-install-pre | create stage directory 
+  when: inventory_hostname in groups['dbservers']
+  remote_user: "{{ root_user }}"
+  file:
+    path="{{ item }}"
+    state=directory
+    owner="{{ root_user }}"
+    group="{{ root_user }}"
+    mode=0775
+  with_items:
+    - "{{ stage_dir }}"
+  tags:
+   - db_createinventory
+
+- name: db-rdbms-install-pre | Copy Oracle preinstall package to target database server
+  when: inventory_hostname in groups['dbservers']  
+  copy: src=roles/db-rdbms-install-pre/files/{{ item }} dest={{ stage_dir }} mode=0755 force=true  ## owner="{{ oracle_user }}" group="{{ oracle_install_group }} show_progress_bar=True"    
+  with_items:
+     - "{{ preinstall_pkg }}"
+  tags:
+   - db_preinstpkg
+
+- name: db-rdbms-install-pre | Execute pre install package using dnf
+  when: inventory_hostname in groups['dbservers'] and  ansible_pkg_mgr == 'dnf'  
+  remote_user: "{{ root_user }}"
+  become: yes
+  ansible.builtin.dnf:
+      name: "/{{ stage_dir }}/{{ preinstall_pkg }}"
+      state: present
+      disable_gpg_check: yes
+
+- name: db-rdbms-install-pre | Execute other pre install package using dnf 
+  when: inventory_hostname in groups['dbservers']
+  remote_user: "{{ root_user }}"
+  become: yes
+  ansible.builtin.dnf:
+      name: "{{ item }}"
+      state: present
+  with_items:
+     - "{{ preinstall_os_pkg }}"      
+
+
+
+- name: db-rdbms-install-pre | create required directories
+  when: inventory_hostname in groups['dbservers']
+  remote_user: "{{ root_user }}"
+  file:
+    path="{{ item }}"
+    state=directory
+    owner="{{ oracle_user }}"
+    group="{{ oracle_install_group }}"
+    mode=0775
+  with_items:
+    - "{{ oracle_mount_dir }}"  
+    - "{{ oracle_base }}"    
+    - "{{ oracle_inventory }}"
+    - "{{ stage_dir }}"
+    - "{{ oracle_home }}"
+    - "{{ oracle_rdbms_patch_stage_dir }}"      
+    - "{{ db_datafiles_dir }}"  
+    - "{{ db_redo_logs_dir }}"  
+    - "{{ db_fra_arch_files_dir }}"  
+  tags:
+   - db_createinventory
+
+- name: db-rdbms-install-pre | Get free space on disk for RDBMS installation
+  shell: df -m {{ oracle_home }} | awk 'NR>1{print $4}'
+  register: df_output
+
+- name: db-rdbms-install-pre | Ensure free space on disk for RDBMS installation
+  assert:
+    that: df_output.stdout | int > min_orahome_diskspace_in_mb | int 
+    msg: "warning: disk free space is low ( expected  < {{ min_orahome_diskspace_in_mb }} MB, available df_output.stdout MB  in {{ oracle_home }} ) "
+
+
+####################### TPH and Huge Pages Releated checks/fixes Starts Here #################################################
+
+- name: db-rdbms-install-pre | Check Transparent Huge Pages status
+  shell: cat /sys/kernel/mm/transparent_hugepage/enabled
+  register: thp_status
+- debug: var=thp_status.stdout
+
+- name: db-rdbms-install-pre | Disable Transparent Huge Pages if enabled
+  when: thp_status.stdout | trim  in ['always', 'madvise']
+  shell: |
+    echo 'never' > /sys/kernel/mm/transparent_hugepage/enabled
+    grubby --args="transparent_hugepage=never" --update-kernel ALL
+
+- name: db-rdbms-install-pre | Validate and Change Oracle user security limits
+  ansible.builtin.lineinfile:
+    path: /etc/security/limits.d/oracle-database-preinstall-19c.conf
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+    - { regexp: '^oracle   soft   nofile',  line: 'oracle   soft   nofile    131072' }
+    - { regexp: '^oracle   hard   nofile',  line: 'oracle   hard   nofile    131072' }
+    - { regexp: '^oracle   soft   nproc',   line: 'oracle   soft   nproc     131072' }
+    - { regexp: '^oracle   hard   nproc',   line: 'oracle   hard   nproc     unlimited' }
+    - { regexp: '^oracle   soft   stack',   line: 'oracle   soft   stack     10240' }
+    - { regexp: '^oracle   hard   stack',   line: 'oracle   hard   stack     32768' }
+    - { regexp: '^oracle   soft   memlock', line: 'oracle   soft   memlock   595576809000' }
+    - { regexp: '^oracle   hard   memlock', line: 'oracle   hard   memlock   674987050000' }
+    - { regexp: '^oracle   soft   data',    line: 'oracle   soft   data      unlimited' }
+    - { regexp: '^oracle   hard   data',    line: 'oracle   hard   data      unlimited' }
+
+- name: db-rdbms-install-pre | Validate and Change sysctl configurations
+  ansible.builtin.lineinfile:
+    path: /etc/sysctl.d/99-oracle-database-preinstall-19c-sysctl.conf
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+    - { regexp: '^fs.file-max =',  line: 'fs.file-max = 6815744' }
+    - { regexp: '^kernel.sem =',  line: 'kernel.sem = 250 32000 100 128' }
+    - { regexp: '^kernel.shmmni =',   line: 'kernel.shmmni = 4096' }
+    - { regexp: '^kernel.shmall =',   line: 'kernel.shmall = 1073741824' }
+    - { regexp: '^kernel.shmmax =',   line: 'kernel.shmmax = 4398046511104' }
+    - { regexp: '^kernel.panic_on_oops =',   line: 'kernel.panic_on_oops = 1' }
+    - { regexp: '^net.core.rmem_default =', line: 'net.core.rmem_default = 262144' }
+    - { regexp: '^net.core.rmem_max =', line: 'net.core.rmem_max = 4194304' }
+    - { regexp: '^net.core.wmem_default =',    line: 'net.core.wmem_default = 262144' }
+    - { regexp: '^net.core.wmem_max =',    line: 'net.core.wmem_max = 1048576' }
+    - { regexp: '^net.ipv4.conf.all.rp_filter =',    line: 'net.ipv4.conf.all.rp_filter = 2' }    
+    - { regexp: '^net.ipv4.conf.default.rp_filter =',    line: 'net.ipv4.conf.default.rp_filter = 2' }
+    - { regexp: '^fs.aio-max-nr =',    line: 'fs.aio-max-nr = 1048576' }    
+    - { regexp: '^net.ipv4.ip_local_port_range =',    line: 'net.ipv4.ip_local_port_range = 9000 65500' }    
+
+
+- name: db-rdbms-install-pre | get shmmax from sysctl if any
+  shell: sysctl -f /etc/sysctl.conf -r kernel.shmmax -n || true
+  register: v_shmmax_sysctl
+  changed_when: false
+
+- name: db-rdbms-install-pre | get shmall from sysctl if any
+  shell: sysctl -f /etc/sysctl.conf -r kernel.shmall -n || true
+  register: v_shmall_sysctl
+  changed_when: false
+
+- name: db-rdbms-install-pre | get shmmni from sysctl if any
+  shell: sysctl -f /etc/sysctl.conf -r kernel.shmmni -n || true
+  register: v_shmmni_sysctl
+  changed_when: false
+
+# - name: db-rdbms-install-pre | get total RAM
+#   shell: set -o pipefail; cat /proc/meminfo | ( grep MemTotal || true ) | awk '{print $2*1024}'
+#   register: v_ram
+
+- name: db-rdbms-install-pre | get shmmax from memory if not configured in sysctl
+  shell: cat /proc/sys/kernel/shmmax || true
+  register: v_shmmax
+  when: v_shmmax_sysctl.stdout == ""
+  changed_when: false
+
+- name: db-rdbms-install-pre | get shmall from memory if not configured in sysctl
+  shell: cat /proc/sys/kernel/shmall || true
+  register: v_shmall
+  when: v_shmall_sysctl.stdout == ""
+  changed_when: false
+
+- name: db-rdbms-install-pre | get shmmni from memory if not configured in sysctl
+  shell: cat /proc/sys/kernel/shmmni || true
+  register: v_shmmni
+  changed_when: false
+
+- name: db-rdbms-install-pre | get Hugepagesize from memory
+  shell: set -o pipefail; ( cat /proc/meminfo | ( grep Hugepagesize || true ) | cut -d " " -f8 ) || true
+  register: v_hugepagesize
+  changed_when: false
+
+- debug: var=ansible_memory_mb.real.total
+- debug: var=v_shmmax_sysctl.stdout_lines
+- debug: var=v_shmmax.stdout_lines
+- debug: var=v_shmall_sysctl.stdout_lines
+- debug: var=v_shmall.stdout_lines
+- debug: var=v_shmmni_sysctl.stdout_lines
+- debug: var=v_shmmni.stdout_lines
+- debug: var=v_hugepagesize.stdout_lines
+- debug: var=ram_pct_used
+
+- name: db-rdbms-install-pre | configure memlock limits
+  pam_limits: domain=oracle limit_type={{ item }} limit_item=memlock value=unlimited
+  with_items:
+    - soft
+    - hard
+
+- name: db-rdbms-install-pre | set shmmax,shmmni,shmall and hugepages if shmmax is not set
+  sysctl: name={{ item.name }} value={{ item.value }} sysctl_file=/etc/sysctl.conf sysctl_set=yes state=present reload=yes
+  with_items:
+    - {
+        name: "kernel.shmmax",
+        value: "{{ (ansible_memory_mb.real.total*1024*1024*ram_pct_used|int)//100 }}",
+      }
+    - {
+        name: "kernel.shmall",
+        value: "{{ (((ansible_memory_mb.real.total*1024*1024*ram_pct_used|int)/100)/v_shmmni.stdout|int)|round(0,'ceil')|int }}",
+      }
+    - { name: "kernel.shmmni", value: "{{ v_shmmni.stdout|int }}" }
+    - {
+        name: "vm.nr_hugepages",
+        value: "{{ ((ansible_memory_mb.real.total*ram_pct_used|int)//100)//((v_hugepagesize.stdout|int)//1024) }}",
+      }
+  when: v_shmmax_sysctl.stdout == ""
+
+- name: db-rdbms-install-pre | adjust shmmax,shmmni,shmall and hugepages if shmmax is already set but not according recommendations
+  sysctl: name={{ item.name }} value={{ item.value }} sysctl_file=/etc/sysctl.conf sysctl_set=yes state=present reload=yes
+  with_items:
+    - {
+        name: "kernel.shmmax",
+        value: "{{ (ansible_memory_mb.real.total*1024*1024*ram_pct_used|int)//100 }}",
+      }
+    - {
+        name: "kernel.shmall",
+        value: "{{ (((ansible_memory_mb.real.total*1024*1024*ram_pct_used|int)/100)/v_shmmni.stdout|int)|round(0,'ceil')|int }}",
+      }
+    - { name: "kernel.shmmni", value: "{{ v_shmmni.stdout|int }}" }
+    - {
+        name: "vm.nr_hugepages",
+        value: "{{ ((ansible_memory_mb.real.total*ram_pct_used|int)//100)//((v_hugepagesize.stdout|int)//1024) }}",
+      }
+  when: v_shmmax_sysctl.stdout != "" and (v_shmmax_sysctl.stdout|int < (ansible_memory_mb.real.total*1024*1024*ram_pct_used|int)//100)
+
+- name: db-rdbms-install-pre | adjust shmmni,shmall and hugepages if shmmax is already set according recommendations
+  sysctl: name={{ item.name }} value={{ item.value }} sysctl_file=/etc/sysctl.conf sysctl_set=yes state=present reload=yes
+  with_items:
+    - {
+        name: "kernel.shmall",
+        value: "{{ (v_shmmax_sysctl.stdout|int/v_shmmni.stdout|int)|round(0,'ceil')|int }}",
+      }
+    - { name: "kernel.shmmni", value: "{{ v_shmmni.stdout|int }}" }
+    - {
+        name: "vm.nr_hugepages",
+        value: "{{ (((v_shmmax_sysctl.stdout|int)/1024/1024)//((v_hugepagesize.stdout|int)//1024))|round(0,'ceil')|int }}",
+      }
+  when: v_shmmax_sysctl.stdout != "" and (v_shmmax_sysctl.stdout|int >= (ansible_memory_mb.real.total*1024*1024*ram_pct_used|int)//100) and (v_shmmax_sysctl.stdout|int < ansible_memory_mb.real.total*1024*1024)
+
+- name: db-rdbms-install-pre | adjust shmmax,shmmni,shmall and hugepages if shmmax is already set but bigger then RAM
+  sysctl: name={{ item.name }} value={{ item.value }} sysctl_file=/etc/sysctl.conf sysctl_set=yes state=present reload=yes
+  with_items:
+    - {
+        name: "kernel.shmmax",
+        value: "{{ (ansible_memory_mb.real.total*1024*1024*ram_pct_used|int)//100 }}",
+      }
+    - {
+        name: "kernel.shmall",
+        value: "{{ (((ansible_memory_mb.real.total*1024*1024*ram_pct_used|int)/100)/v_shmmni.stdout|int)|round(0,'ceil')|int }}",
+      }
+    - { name: "kernel.shmmni", value: "{{ v_shmmni.stdout|int }}" }
+    - {
+        name: "vm.nr_hugepages",
+        value: "{{ ((ansible_memory_mb.real.total*ram_pct_used|int)//100)//((v_hugepagesize.stdout|int)//1024) }}",
+      }
+  when: v_shmmax_sysctl.stdout != "" and (v_shmmax_sysctl.stdout|int > ansible_memory_mb.real.total*1024*1024)
+
+- name: db-rdbms-install-pre | Check transparent hugepage
+  shell: ( cat /sys/kernel/mm/transparent_hugepage/enabled ) || true
+  become: true
+  become_user: root
+  register: check_tph
+  ignore_errors: true
+  changed_when: false
+
+- debug: var=check_tph
+
+- name: db-rdbms-install-pre | Update Grub default config
+  shell: grubby --args="transparent_hugepage=never" --update-kernel=ALL
+  when: check_tph.stdout == "[always] madvise never" or check_tph.stdout == "always [madvise] never"
+  register: grubby_tph
+
+- debug: var=grubby_tph
+
+- name: db-rdbms-install-pre | Temporary run-time disabling of THP
+  shell: |
+    echo 'never' > /sys/kernel/mm/transparent_hugepage/enabled
+    echo 'never' > /sys/kernel/mm/transparent_hugepage/defrag
+  when: check_tph.stdout == "[always] madvise never" or check_tph.stdout == "always [madvise] never"
+
+- name: db-rdbms-install-pre | Check if THP shows as used and recommend reboot if AnonHugePages in /proc/meminfo is nonzero
+  shell: grep -q '^AnonHugePages:\ *0\ kB$' /proc/meminfo || echo reboot
+  register: check_thp_reboot
+  ignore_errors: true
+  changed_when: false
+
+- debug:
+    msg: "WARNING: A reboot is required to disable transparent huge pages"
+  when: check_thp_reboot.stdout == "reboot"
+
+## Huge page authority to avoid ORA-27125 Linux-x86_64 Error: 1: Operation not permitted
+- name: db-rdbms-install-pre | Read current hugetlb_shm_group value
+  shell: sysctl -n vm.hugetlb_shm_group
+  register: existing_gid
+  changed_when: false
+  failed_when: false  # Avoid failure if the key doesn't exist
+
+- name: db-rdbms-install-pre | Get oracle user group id
+  shell: id -g {{ oracle_user }}
+  register: oracle_gid
+  changed_when: false
+  failed_when: false  # Avoid failure if the key doesn't exist  
+  
+- name: db-rdbms-install-pre | Grant hugepage authority to db user group
+  sysctl:
+    name: vm.hugetlb_shm_group
+    value: "{{ oracle_gid.stdout }}"
+    state: present
+    reload: yes
+  # if   existing_gid.stdout = 0 usually means for all users, in lab env it did not work, so remvoing existing_gid.stdout != "0" below
+  #when: existing_gid.stdout != "0" and existing_gid.stdout != oracle_gid.stdout
+  when: existing_gid.stdout != oracle_gid.stdout
+
+####################### TPH and Huge Pages Releated checks/fixes Ends Here #################################################  
+
+
+- name: db-rdbms-install-pre | 'Disable unwanted Services'
+  ansible.builtin.service:
+    name: "{{item}}"
+    state: stopped
+    enabled: false
+  loop:
+   - firewalld
+   - avahi-daemon
+  ignore_errors: true 
+
+- name: db-rdbms-install-pre | Put SELinux in permissive mode
+  ansible.posix.selinux:
+    policy: targeted
+    state: permissive
+  when: ansible_facts.selinux.status == 'enabled'
+
+- name: db-rdbms-install-pre | Copy Oracle Binaries to target database server
+  when: inventory_hostname in groups['dbservers']  
+  copy: src=roles/db-rdbms-install-pre/files/{{ item }} dest={{ stage_dir }} mode=0755 force=true owner="{{ oracle_user }}" group="{{ oracle_install_group }}"    
+  with_items:
+     - "{{ oracle_rdbms_binary }}"
+     - "{{ oracle_opatch_binary }}"
+     - "{{ oracle_rdbms_patch_binary }}"
+  tags:
+   - db_binary
+  ignore_errors: false 
+
+
+- name: db-rdbms-install-pre | Unpack Oracle RDBMS Binaries on the target server
+  when: inventory_hostname in groups['dbservers']
+  remote_user: "{{ root_user }}"
+  become: yes
+  become_user: "{{ oracle_user }}"
+  unarchive:
+     src={{ stage_dir }}/{{ item }}
+     dest="{{ oracle_home }}"
+     creates="{{ oracle_rdbms_binary_flagFile }}" 
+     remote_src=yes
+     mode=0775
+     group="{{ oracle_install_group }}"
+     owner="{{ oracle_user }}"
+  with_items:
+     - "{{ oracle_rdbms_binary }}"     
+  tags:
+   - db_unpackdbsoftware
+  ignore_errors: false   
+
+
+- name: db-rdbms-install-pre | Unpack Oracle Patch Binaries on the target server
+  when: inventory_hostname in groups['dbservers']
+  remote_user: "{{ root_user }}"
+  become: yes
+  become_user: "{{ oracle_user }}"
+  unarchive:
+     src={{ stage_dir }}/{{ item }}
+     dest="{{ stage_dir }}"
+     creates="{{ oracle_rdbms_patch_flagFile }}" 
+     remote_src=yes     
+     mode=0775
+     group="{{ oracle_install_group }}"
+     owner="{{ oracle_user }}"
+  with_items:
+     - "{{ oracle_rdbms_patch_binary }}"     
+  tags:
+   - db_unpackdbsoftware
+  ignore_errors: false   
+
+
+- name: db-rdbms-install-pre | Remove copied Oracle Binaries from target database server to save space, just for lab env
+  when: inventory_hostname in groups['dbservers']  
+  file: 
+     path: "{{ stage_dir }}/{{ item }}"
+     state: absent
+  with_items:
+     - "{{ oracle_rdbms_binary }}"
+     - "{{ oracle_rdbms_patch_binary }}"
+  tags:
+   - db_binary
+  ignore_errors: false 
+
+
+- name: db-rdbms-install-pre | Should you install Oracle RDBMS ?
+  ansible.builtin.debug:
+    msg: 
+    - ' *** Note *** If you are to install Oracle RDBMS, please make sure '
+    - ' the flagfile {{ oracle_installed_flagFile }} does not exists. If exists, Ansible will not install the Oracle RDBMS '
+    - ' Pre install validations tasks completed at {{ansible_date_time.iso8601}}:'

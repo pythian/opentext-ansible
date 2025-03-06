@@ -1,0 +1,261 @@
+---
+- name: db-create  | display pre database create message
+  remote_user: "{{ root_user }}"
+  debug:
+    msg:
+      - 'Oracle primary Database verify and create tasks started for Single Instance at {{ansible_date_time.iso8601}}:'
+
+##### Calculate SGA target related starts here #####
+- name: db-create | Get the total number of free hugepages
+  shell: "cat /proc/meminfo | grep HugePages_Free | awk '{print $2}'"
+  register: hugepages_free_total
+
+- name: db-create | Get the hugepage size
+  shell: "cat /proc/meminfo | grep Hugepagesize | awk '{print $2}'"
+  register: hugepages_size
+
+- name: db-create | Ensure hugepages total and hugepages size are integers
+  set_fact:
+    hugepages_free_total_int: "{{ hugepages_free_total.stdout | trim | int }}"
+    hugepages_size_int: "{{ hugepages_size.stdout | trim | int }}"
+
+- name: db-create | Calculate total hugepages memory in bytes
+  set_fact:
+    hugepages_memory_bytes: "{{ hugepages_free_total_int | int * hugepages_size_int | int }}"
+
+- name: db-create | Calculate % of hugepages memory (ensure integer result)
+  set_fact:
+    sga_target_bytes: "{{ (hugepages_memory_bytes | int  *  sga_target_pct  | int  ) // 100 }}"
+
+- name: db-create | Convert % memory in bytes to megabytes (integer division)
+  set_fact:
+    sga_target_mb: "{{ (sga_target_bytes | int // 1024 | round(0)) }}"
+
+##### Calculate SGA target related ends here #####
+
+- name: db-create | Adjust instance memory values
+  set_fact:
+    #sga_target_bytes: "{{ sga_target }}"
+    pga_aggtar_bytes: "{{ pga_aggtar }}"
+  tags: db-create
+
+- name: db-create | Test whether pmon process by same name already exists
+  shell: "set -o pipefail; ps -ef | ( grep pmon || true ) | ( grep -i {{ database_name }} || true ) | ( grep -v grep || true ) | wc -l"
+  changed_when: false
+  register: pmon_proc
+  tags: db-create
+
+- name: db-create | Check if database is already in oratab
+  shell: "set -o pipefail; ( grep -i {{ database_name }}: /etc/oratab || true ) | wc -l"
+  changed_when: false
+  register: check_oratab
+  tags: db-create
+
+- name: db-create | Databasealready exists check results
+  debug:
+    msg: "{{ item }}"
+    verbosity: 1
+  with_items:
+    - "{{ pmon_proc }}"
+    - "{{ check_oratab }}"
+  tags: db-create
+
+
+#- name: db-create | Copy Template Files
+  #import_role:
+  #  name: swlib
+  #  tasks_from: template_copy.yml
+#  vars:
+#    patching_type: template_copy
+#  when:
+#    - pmon_proc.stdout == "0"
+#    - check_oratab.stdout == "0"
+#    - oracle_template != "General_Purpose.dbc"
+#  tags: db-create,sw-copy
+
+- name: db-create | Update template file to have redo log multiplexing
+  become: true
+  become_user: "{{ oracle_user }}"
+  template:
+    src: "{% if oracle_template == 'General_Purpose.dbc' %}{% if storageType == 'fs' %}{{ 'dbca-template-fs.rsp.sh.j2' }}{% else %}{{ 'dbca-template.rsp.sh.j2' }}{% endif %}{% else %}{% if storageType == 'fs' %}{{ 'dbca-fs.rsp.sh.j2' }}{% else %}{{ 'dbca.rsp.sh.j2' }} {% endif %}{% endif %}"
+    dest: "{{ stage_dir }}/dbca_{{ database_name }}.rsp.sh"
+    owner: "{{ oracle_user }}"
+    group: "{{ oracle_install_group }}"
+  when: pmon_proc.stdout == "0" and check_oratab.stdout == "0"
+  tags: db-create
+
+- name: db-create | Create DBCA response file script
+  become: true
+  become_user: "{{ oracle_user }}"
+  template:
+    src: "{% if oracle_template == 'General_Purpose.dbc' %}{% if storageType == 'fs' %}{{ 'dbca-template-fs.rsp.sh.j2' }}{% else %}{{ 'dbca-template.rsp.sh.j2' }}{% endif %}{% else %}{% if storageType == 'fs' %}{{ 'dbca-fs.rsp.sh.j2' }}{% else %}{{ 'dbca.rsp.sh.j2' }} {% endif %}{% endif %}"
+    dest: "{{ stage_dir }}/dbca_{{ database_name }}.rsp.sh"
+    owner: "{{ oracle_user }}"
+    group: "{{ oracle_install_group }}"
+  when: pmon_proc.stdout == "0" and check_oratab.stdout == "0"
+  tags: db-create
+
+- name: db-create | Run DBCA response file script
+  become: true
+  become_user: "{{ oracle_user }}"
+  command: "sh {{ stage_dir }}/dbca_{{ database_name }}.rsp.sh"
+  register: rspout
+  when: pmon_proc.stdout == "0" and check_oratab.stdout == "0"
+  tags: db-create
+
+#- name: db-create | Script cleanup
+#  become: true
+#  become_user: "{{ oracle_user }}"
+#  file:
+#    path: "{{ stage_dir }}/dbca_{{ database_name }}.rsp.sh"
+#    state: absent
+#  tags: db-create
+
+- name: db-create | DBCA response file differences to template
+  debug:
+    msg: "{{ rspout.stdout_lines }}"
+    verbosity: 1
+  when: pmon_proc.stdout == "0" and check_oratab.stdout == "0"
+  tags: db-create
+
+- name: db-create | Copy other required files to target database server
+  when: inventory_hostname in groups['dbservers']  
+  copy: src=roles/db-create/files/{{ item }} dest={{ stage_dir }} mode=0755 force=true owner="{{ oracle_user }}" group="{{ oracle_install_group }}"    
+  with_items:
+     - create_sby_redo_logs.sql
+  tags:
+   - db_binary
+  ignore_errors: false 
+
+- name: db-create | Take Backup of the DB template file 
+  become: true
+  become_user: "{{ oracle_user }}"
+  copy:
+    src: "{{ oracle_home }}/assistants/dbca/templates/{{ oracle_template }}"
+    dest: "{{ oracle_home }}/assistants/dbca/templates/{{ oracle_template }}.{{ ansible_date_time.iso8601 }}.backup"
+    remote_src: yes  # Ensures copying an existing remote file
+  ignore_errors: False
+
+- name: db-create | Insert a line into the DB template file for redo log multiplexing
+  ignore_errors: False
+  lineinfile:
+    path: "{{ oracle_home }}/assistants/dbca/templates/{{ oracle_template }}"
+    insertafter: '{{ item.tag }}'
+    line: '{{ item.content }}'
+  loop:
+    - { tag: '<member ordinal="0" memberName="redo01.log" filepath="{ORACLE_BASE}/oradata/{DB_UNIQUE_NAME}/"/>', content: '         <member ordinal="1" memberName="redo01b.log" filepath="{ORACLE_BASE}/oradata/{DB_UNIQUE_NAME}/"/>' }      
+    - { tag: '<member ordinal="0" memberName="redo02.log" filepath="{ORACLE_BASE}/oradata/{DB_UNIQUE_NAME}/"/>', content: '         <member ordinal="1" memberName="redo02b.log" filepath="{ORACLE_BASE}/oradata/{DB_UNIQUE_NAME}/"/>' }      
+    - { tag: '<member ordinal="0" memberName="redo03.log" filepath="{ORACLE_BASE}/oradata/{DB_UNIQUE_NAME}/"/>', content: '         <member ordinal="1" memberName="redo03b.log" filepath="{ORACLE_BASE}/oradata/{DB_UNIQUE_NAME}/"/>' }              
+
+
+- name: db-create | Replace strings in the DB template file for redo log multiplexing
+  ignore_errors: False
+  replace:
+    path: "{{ oracle_home }}/assistants/dbca/templates/{{ oracle_template }}"
+    regexp: "{{ item.old }}"
+    replace: "{{ item.new }}"
+  loop:
+    - { old: "redo01.log", new: "redo01a.log" }
+    - { old: "redo02.log", new: "redo02a.log" }
+    - { old: "redo03.log", new: "redo03a.log" }
+
+#{{ pwd_gen_cmd }} | dbca -silent -createDatabase -dbOptions JSERVER:{{ jserver }},OMS:{{ oms }},DV:{{ dv }},APEX:{{ apex }},SPATIAL:{{ spatial }},IMEDIA:{{ imedia }},ORACLE_TEXT:{{ oracle_text }},CWMLITE:{{ cwmlite }} -recoveryAreaSize {{ recoveryareasize }}  -redoLogFileSize {{ redologsize }} -responseFile {{ stage_dir }}/dbca_{{ database_name }}.rsp
+## Create database using DBCA ##
+- name: db-create | Create database using DBCA
+  ignore_errors: False
+  block:
+    - name: db-create | Run DBCA
+      become: true
+      become_user: "{{ oracle_user }}"
+      shell: |
+        set -o pipefail
+        export PATH={{ oracle_home }}/bin:${PATH}
+        dbca -silent -createDatabase -dvConfiguration {{ dv }} -olsConfiguration {{ ols }} -dbOptions JSERVER:{{ jserver }},OMS:{{ oms }},DV:{{ dv }},APEX:{{ apex }},SPATIAL:{{ spatial }},IMEDIA:{{ imedia }},ORACLE_TEXT:{{ oracle_text }},CWMLITE:{{ cwmlite }} -recoveryAreaSize {{ recoveryareasize }}  -redoLogFileSize {{ redologsize }}   -enableArchive {{ enablearchive }} -responseFile {{ stage_dir }}/dbca_{{ database_name }}.rsp
+      register: dbca_output
+      failed_when: "'Completing Database Creation' not in dbca_output.stdout or '100% complete' not in dbca_output.stdout"
+      when: pmon_proc.stdout == "0" and check_oratab.stdout == "0" and create_db
+      tags: db-create
+  rescue:
+    - name: db-create | Retrieve DBCA logs
+      slurp:
+        src: "{{ oracle_base }}/cfgtoollogs/dbca/{{ database_name }}/{{ database_name }}.log"
+      register: dbcalog
+    - debug:
+        msg: "{{ dbcalog['content'] | b64decode }}"
+
+- name: db-create | DBCA output
+  debug:
+    msg:
+      - "{{ dbca_output.cmd }}"
+      - "{{ dbca_output.stdout_lines }}"
+    # verbosity: 1
+  when: pmon_proc.stdout == "0" and check_oratab.stdout == "0"
+  tags: db-create
+
+- name: db-create | Enable database for standby DB creation
+  become: true
+  become_user: "{{ oracle_user }}"
+  shell: |
+        set -o pipefail
+        export PATH={{ oracle_home }}/bin:${PATH}
+        export ORACLE_HOME={{ oracle_home }}
+        export ORACLE_SID={{ database_unique_name }}
+        $ORACLE_HOME/bin/sqlplus "/as sysdba" << EOF
+        ALTER DATABASE FORCE LOGGING;
+        ALTER DATABASE FLASHBACK ON;        
+        @{{ stage_dir }}/create_sby_redo_logs.sql
+        exit;
+        EOF
+  register: result
+  when: pmon_proc.stdout == "0" and check_oratab.stdout == "0"
+  ignore_errors: False
+
+- name: db-create | Shutdown Oracle Database to make sure it comes up clean
+  become: true
+  become_user: "{{ oracle_user }}"
+  shell: |
+        set -o pipefail
+        export PATH={{ oracle_home }}/bin:${PATH}
+        export ORACLE_HOME={{ oracle_home }}
+        export ORACLE_SID={{ database_unique_name }}
+        $ORACLE_HOME/bin/sqlplus "/as sysdba" << EOF
+        SHUTDOWN IMMEDIATE;
+        exit;
+        EOF
+  register: result
+  when: pmon_proc.stdout == "0" and check_oratab.stdout == "0"
+  ignore_errors: False
+
+- name: db-create | Show Shutdown DB result
+  debug:
+     var: result.stdout
+  tags: db-create    
+
+
+- name: db-create | Startup Oracle Database
+  become: true
+  become_user: "{{ oracle_user }}"
+  shell: |
+        set -o pipefail
+        export PATH={{ oracle_home }}/bin:${PATH}
+        export ORACLE_HOME={{ oracle_home }}
+        export ORACLE_SID={{ database_unique_name }}
+        whoami
+        $ORACLE_HOME/bin/sqlplus "/as sysdba" << EOF
+        STARTUP;
+        exit;
+        EOF
+  register: result
+  when: pmon_proc.stdout == "0" and check_oratab.stdout == "0"
+  ignore_errors: False
+
+- name: db-create | Show startup DB result
+  debug:
+    var: result.stdout
+  tags: db-create    
+
+
+- name: db-create | display post priamry db create message
+  debug:
+    msg:
+      - '##### Oracle Primary database create tasks completed at {{ansible_date_time.iso8601}}: #####'

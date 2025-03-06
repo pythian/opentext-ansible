@@ -1,0 +1,19 @@
+#!/bin/bash
+
+cp {{ oracle_home }}/assistants/dbca/dbca.rsp {{ stage_dir }}/dbca_{{ database_name }}.rsp
+
+sed -i '/^\#\{0,\} \{0,\}gdbName \{0,\}=/I                   s~\#\{0,\} \{0,\}gdbName \{0,\}=.*~gdbName='{{ database_name }}'.'{{ db_domain }}'~I'                        {{ stage_dir }}/dbca_{{ database_name }}.rsp
+sed -i '/^\#\{0,\} \{0,\}sid \{0,\}=/I                       s~\#\{0,\} \{0,\}sid \{0,\}=.*~sid='{{ database_unique_name }}'~I'                                                  {{ stage_dir }}/dbca_{{ database_name }}.rsp
+sed -i '/^\#\{0,\} \{0,\}databaseConfigType \{0,\}=/I        s~\#\{0,\} \{0,\}databaseConfigType \{0,\}=.*~databaseConfigType='{{ db_config_type }}'~I'             {{ stage_dir }}/dbca_{{ database_name }}.rsp
+sed -i '/^\#\{0,\} \{0,\}templateName \{0,\}=/I              s~\#\{0,\} \{0,\}templateName \{0,\}=.*~templateName='{{ oracle_template }}'~I'                            {{ stage_dir }}/dbca_{{ database_name }}.rsp
+sed -i '/^\#\{0,\} \{0,\}emConfiguration \{0,\}=/I           s~\#\{0,\} \{0,\}emConfiguration \{0,\}=.*~emConfiguration=NONE~I'                                     {{ stage_dir }}/dbca_{{ database_name }}.rsp
+sed -i '/^\#\{0,\} \{0,\}storageType \{0,\}=/I               s~\#\{0,\} \{0,\}storageType \{0,\}=.*~storageType=FS~I'                                               {{ stage_dir }}/dbca_{{ database_name }}.rsp
+sed -i '/^\#\{0,\} \{0,\}datafileDestination \{0,\}=/I       s~\#\{0,\} \{0,\}datafileDestination \{0,\}=.*~datafileDestination='{{ db_datafiles_dir }}'~I'           {{ stage_dir }}/dbca_{{ database_name }}.rsp
+sed -i '/^\#\{0,\} \{0,\}recoveryAreaDestination \{0,\}=/I   s~\#\{0,\} \{0,\}recoveryAreaDestination \{0,\}=.*~recoveryAreaDestination='{{ db_fra_arch_files_dir }}'~I'   {{ stage_dir }}/dbca_{{ database_name }}.rsp
+sed -i '/^\#\{0,\} \{0,\}databaseType \{0,\}=/I              s~\#\{0,\} \{0,\}databaseType \{0,\}=.*~databaseType='{{ db_type }}'~I'                                {{ stage_dir }}/dbca_{{ database_name }}.rsp
+sed -i '/^\#\{0,\} \{0,\}automaticMemoryManagement \{0,\}=/I s~\#\{0,\} \{0,\}automaticMemoryManagement \{0,\}=.*~automaticMemoryManagement=false~I'                {{ stage_dir }}/dbca_{{ database_name }}.rsp
+sed -i '/^\#\{0,\} \{0,\}sysPassword \{0,\}=/I               s~\#\{0,\} \{0,\}sysPassword \{0,\}=.*~#sysPassword=~I'                                                {{ stage_dir }}/dbca_{{ database_name }}.rsp
+sed -i '/^\#\{0,\} \{0,\}systemPassword \{0,\}=/I            s~\#\{0,\} \{0,\}systemPassword \{0,\}=.*~#systemPassword=~I'                                          {{ stage_dir }}/dbca_{{ database_name }}.rsp
+sed -i '/^\#\{0,\} \{0,\}pdbAdminPassword \{0,\}=/I          s~\#\{0,\} \{0,\}pdbAdminPassword \{0,\}=.*~#pdbAdminPassword=~I'                                      {{ stage_dir }}/dbca_{{ database_name }}.rsp
+sed -i '/^\#\{0,\} \{0,\}listeners \{0,\}=/I                 s~\#\{0,\} \{0,\}listeners \{0,\}=.*~listeners='{{ listener_name }}'~I'                                {{ stage_dir }}/dbca_{{ database_name }}.rsp
+sed -i '/^\#\{0,\} \{0,\}initParams \{0,\}=/I                s~\#\{0,\} \{0,\}initParams \{0,\}=.*~initParams=pga_aggregate_target='{{ pga_aggtar_bytes }}',db_unique_name={{ database_unique_name }},dg_broker_start={{ dg_broker_start }},standby_file_management={{ standby_file_management }},sga_target='{{ sga_target_mb }}M',db_create_file_dest='{{ db_datafiles_dir }}',streams_pool_size=64M,use_large_pages=TRUE,db_domain='{{ db_domain }}',local_listener='{{ listener_name }}',diagnostic_dest='{{ oracle_base }}'~I' {{ stage_dir }}/dbca_{{ database_name }}.rsp

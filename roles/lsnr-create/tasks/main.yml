@@ -1,0 +1,105 @@
+---
+- name: lsnr-create  | display pre listener create message
+  remote_user: "{{ root_user }}"
+  debug:
+    msg:
+      - 'Oracle Listener verify and create tasks started for Single Instance at {{ansible_date_time.iso8601}}:'
+
+- name: lsnr-create | Open listener port in firewall
+  firewalld:
+    port: "{{ listener_port }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  register: firewall_output
+  failed_when:
+    - "'firewall is not currently running' not in firewall_output.msg"
+    - "'Permanent and Non-Permanent(immediate) operation' not in firewall_output.msg"
+  when: not disable_firewall|bool
+  tags: lsnr-create
+
+- name: lsnr-create | Test whether port is free
+  become: true
+  become_user: root
+  shell: "set -o pipefail; netstat -lnpt | ( grep {{ listener_port }} || true ) | wc -l"
+  changed_when: false
+  when: create_listener
+  register: lsnr_port_check
+  tags: lsnr-create
+
+- name: lsnr-create | Check if listener has already been created
+  become: true
+  become_user: root
+  shell: "set -o pipefail; ps -ef | ( grep [t]ns ||true ) | ( grep -w {{ listener_name }} || true ) | wc -l"
+  changed_when: false
+  when: create_listener
+  register: lsnr_name_check
+  tags: lsnr-create
+
+- name: lsnr-create | Listener check results
+  debug:
+    msg: "{{ item }}"
+    verbosity: 1
+  with_items:
+    - "{{ lsnr_port_check }}"
+    - "{{ lsnr_name_check }}"
+  when: create_listener
+  tags: lsnr-create
+
+
+- name: lsnr-create | Create non-grid listener.ora file
+  ansible.builtin.blockinfile:
+    path: "{{ oracle_home }}/network/admin/listener.ora"
+    block: "{{ lookup('template', 'listener.ora.j2')| trim  }}"
+    marker: "# ANSIBLE MANAGED BLOCK for {{ database_name }}"
+    insertafter: EOF  # Ensures it is appended at the end of the file
+    create: yes  # Ensures the file is created if missing  
+    state: present   
+    mode: u=rw,g=r,o=
+    owner: "{{ oracle_user }}"
+    group: "{{ oracle_install_group }}"   
+    backup: true 
+  become: true
+  become_user: "{{ oracle_user }}"
+  when: create_listener and lsnr_port_check.stdout == "0" and lsnr_name_check.stdout == "0"
+  tags: lsnr-create
+
+
+- name: lsnr-create | Create non-grid listener
+  become: true
+  become_user: "{{ oracle_user }}"
+  environment:
+    ORACLE_HOME: "{{ oracle_home }}"
+  shell: |
+    export PATH={{ oracle_home }}/bin:${PATH}
+    lsnrctl start {{ listener_name }}
+    lsnrctl status {{ listener_name }}
+  register: lsnr_output
+  when: create_listener and lsnr_port_check.stdout == "0" and lsnr_name_check.stdout == "0"
+  tags: lsnr-create
+
+- name: lsnr-create | Listener creation output
+  debug:
+    msg:
+      - "{{ lsnr_output.cmd }}"
+      - "{{ lsnr_output.stdout_lines }}"
+    # verbosity: 1
+  when: create_listener and lsnr_port_check.stdout == "0" and lsnr_name_check.stdout == "0"
+  tags: lsnr-create
+
+- name: lsnr-create | Add SQLNET.AUTHENTICATION_SERVICES line to sqlnet.ora
+  become: yes
+  become_user: "{{ oracle_user }}"
+  lineinfile:
+        path: "{{ oracle_home }}/network/admin/sqlnet.ora"
+        regexp: '^SQLNET.AUTHENTICATION_SERVICES='
+        line: 'SQLNET.AUTHENTICATION_SERVICES=(BEQ,TCP,ALL)'
+        create: yes
+        backup: yes  
+  tags: lsnr-create      
+
+- name: lsnr-create | display post lsnr create message
+  debug:
+    msg:
+      - '##### Listener Create tasks completed at {{ansible_date_time.iso8601}}: #####'      

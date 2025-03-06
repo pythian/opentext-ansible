@@ -1,0 +1,50 @@
+---
+- name: db-rman-config  | display pre rman config message
+  remote_user: "{{ root_user }}"
+  debug:
+    msg:
+      - 'Oracle Database RMAN configuration tasks started at {{ansible_date_time.iso8601}}:'
+
+
+- name: db-rman-config  | Copy set rman config template
+  become: true
+  become_user: "{{ oracle_user }}"  
+  when: 
+    -  inventory_hostname in groups['primary'] or inventory_hostname in groups['standby'] 
+  template:
+    src: set_rman_config.sh.j2
+    dest: "{{ stage_dir }}/set_rman_config.sh"
+    owner: "{{ oracle_user }}"
+    group: "{{ oracle_install_group }}"
+    mode: '0775'
+
+- name: db-rman-config  | Set RMAN configuration
+  become: true
+  become_user: "{{ oracle_user }}"  
+  when: 
+    -  inventory_hostname in groups['primary'] or inventory_hostname in groups['standby'] 
+  shell: |
+      sh {{ stage_dir }}/set_rman_config.sh
+      rm {{ stage_dir }}/set_rman_config.sh
+  register: rman_config
+
+
+- name: db-rman-config  | Apply masking to sensitive values
+  when: inventory_hostname in groups['primary'] or inventory_hostname in groups['standby'] 
+  set_fact:
+    masked_output: >-
+      {{ rman_config.stdout_lines  
+         | map('regex_replace', '(?i)(password\s+)\S+', '********')
+         | list 
+      }}
+
+- name: db-rman-config  | Display cleaned & masked output
+  when: masked_output is defined
+  debug:
+    msg: "{{ masked_output }}"
+
+
+- name: db-rman-config | display post rman config message
+  debug:
+    msg:
+      - '##### Oracle Database RMAN configuration tasks completed at {{ansible_date_time.iso8601}}: #####'

@@ -1,0 +1,277 @@
+###   ****** Begining of Database Servers ( Primary/Standby) Related Configuration  ******* #######
+
+#-- Control Flags in building the DB environment
+create_db:                        false #-- Set it to false to avoid creating Primary DB
+create_standby_db:                false #-- Set it to false to avoid creating Standby DB
+create_listener:                  false #-- Set it to false to avoid creating Listener
+install_rdbms:                    false #-- Set it to false to avoid Installing Oracle RDBMS
+observer_install_client:          true #-- Set it to false to avoid Installing Oracle Client
+configure_dgbroker:               true #-- Set it to true to configure DG broker, Add DB to DG broker, Configure FSFO etc
+configure_rman_property:          true #-- Set it to true to configure rman properties
+#-- Operating System Level Variables
+
+#-- Supported OS version 
+os_major_version:                "9"  
+#-- Minimum Memory required to install binary
+min_memory_in_mb:                5000 # 16384
+#-- Minimum Swap required to install binary
+min_swap_in_mb:                  5000 # 16384
+#-- Minimum Diskspace required to install binary in Oracle Home Mount 
+min_orahome_diskspace_in_mb:     5000 # 51200
+#-- Percentage of memory to be set as Huge pages , here setting 70% of RAM for hugepages
+ram_pct_used:                    70 
+#-- User with root or ability to install binaries/grub changes etc
+root_user:                       root
+
+
+#-- Oracle RDBMS Install related 
+#-- Oracle RDBMS location, home name etc
+oracle_mount_dir:                /u01
+stage_dir:                       /u01/stage
+oracle_base:                     /u01/app/oracle
+oracle_home_version:             19.26.0.0.0
+oracle_home:                     /u01/app/oracle/product/{{ oracle_home_version }}/db
+oracle_inventory:                /u01/app/oraInventory 
+oracle_install_group:            oinstall
+oracle_dba_group:                dba
+oracle_oper_group:               oper
+oracle_user:                     oracle
+#-- Oracle edition to install EE/SE2 etc
+oracle_rdbms_edition:            EE
+#-- Name of the response file as in  roles/db-rdbms-install/templates directory 
+oradbsoft_rsp:                   "19c_SoftOnly"      
+#-- Oracle preinstall package name  as in  roles/db-rdbms-install-pre/files directory 
+preinstall_pkg:                  "oracle-database-preinstall-19c-1.0-1.el9.x86_64.rpm"
+#-- Oracle RDBMS binary name  as in  roles/db-rdbms-install-pre/files directory 
+oracle_rdbms_binary:             "LINUX.X64_193000_db_home.zip"
+#-- Flag file name to avoid unzipping the binary multipletimes, incase had to rerun the play again
+#-- For e.g runInstaller is the file name that would be present after unzipping in the target directory
+oracle_rdbms_binary_flagFile:    "{{ oracle_home }}/runInstaller"
+
+#-- Oracle Patching related
+
+#-- Oracle OPatch binary name  as in  roles/db-rdbms-install-pre/files directory 
+oracle_opatch_binary:            "p6880880_190000_Linux-x86-64.zip"
+#-- Oracle Minimum OPatch Version required to apply required patch
+oracle_opatch_version:           "12.2.0.1.45"
+
+#-- Required Oracle RU  binary name  as in  roles/db-rdbms-install-pre/files directory 
+#-- Note using GI patch to have OCW patch applied as well instead of RDBMS patch
+
+#-- Oracle RU patch binary name  as in  roles/db-rdbms-install-pre/files directory 
+#-- In this case using 19.26
+oracle_rdbms_patch_binary:        "p37257886_190000_Linux-x86-64.zip"   
+#-- Directory in target server to unzip the patch binaries
+oracle_rdbms_patch_stage_dir:     "{{ stage_dir }}/37257886"
+oracle_oneoff_patch_stage_dir:    "{{ stage_dir }}/37257886"
+#-- Flag file name to avoid unzipping the binary multipletimes, incase had to rerun the play again
+#-- For e.g runInstaller is the file name that would be present after unzipping in the target directory
+oracle_rdbms_patch_flagFile:      "{{ stage_dir }}/37257886/README.html"
+#-- Flag file name to avoid installing the binary , incase had to rerun the play again
+#-- For e.g install_ansible_flag.txt  is the file name 
+#-- the ansible-play creates to avoid installing oracle RDBMS
+#-- If you are to run play book on already existing RDBMS home that was not created by 
+#-- this ansible-play then please manually create an empty file
+#-- *** This is must otherwise ansible will try to install RDBMS again  ****
+oracle_installed_flagFile:        "{{ oracle_home }}/install_ansible_flag.txt"
+
+#-- Listener Name and Port
+listener_name:                   "LISTENER_{{ database_unique_name }}"
+listener_port:                    1531
+disable_firewall:                 true
+
+#-- dbca create database related
+#-- Database/Global name
+database_name:                    "demo" 
+#-- database_unique_name is specific to the host, so having them in host file
+
+#-- Directory location of data/redo/fra files
+db_datafiles_dir:                 /u01/d01_automsgprd
+db_redo_logs_dir:                 /u01/d01_automsgprd
+db_fra_arch_files_dir:            /u01/a01_automsgprd
+#-- Database redo log size in MB
+redologsize:                      50 # in Mb
+#-- Template to use while building new databases.
+#-- General_Purpose.dbc does not allow customizing components
+#-- New_Database.dbt allows customization
+oracle_template:                 "New_Database.dbt" 
+#-- Database Domain Name
+db_domain:                       "hub" ## "covisint.net"
+#-- Database Configuration Type, for opentext always use SI unless GI/RAC required
+#-- But this ansible play does not handle GI/RAC
+db_config_type:                  "SI"  ## Single
+#-- Type of database
+db_type:                         "MULTIPURPOSE"
+#-- Storage Type of database. This play does not handle ASM
+storageType:                      "fs" ##FileSystem
+#-- This play does not handle pdb/cdb
+container_db:                     false
+pdb_count:                        0
+pdb_prefix:       
+#-- Database character/national charterset properties
+charset:                          AL32UTF8
+ncharset:                         AL16UTF16
+#-- SYS/SYSTEM User credential when creating database
+systemPassword:                   "hACtt0YlMAiAsMnh"
+sysPassword:                      "hACtt0XlMAiAsMnh"
+
+
+#-- Database Components to configure when creating database
+enablearchive:                    true  
+jserver:                          true
+oms:                              false
+dv:                               false  #Database Valut
+apex:                             false
+spatial:                          false
+imedia:                           false #Oracle Multimedia
+oracle_text:                      false
+cwmlite:                          false #Olap related, Common Warehouse Metamodel
+oaa:                              false #Advanced Analytics
+ols:                              false #Oracle Label Security
+rat:                              false #Real Application Testing
+partitioning:                     true  # Table parititioning
+olap:                             false 
+
+#-- Database Init Parameters related 
+#-- Percentage of free huges pages to use as SGA
+#-- In this case 95% of available huge pages will  be allocated as SGA
+sga_target_pct:                   40 
+#-- Not in use sga_target:                      "2048M"
+#-- Size of PGA in MB
+pga_aggtar:                       "256M"
+#-- Recovery area destination size in MB
+recoveryareasize:                 10240
+#-- dataguard broker process start flag, it is ideal to leave it as true
+dg_broker_start:                  true 
+#-- standby_file_management parameter,  it is ideal to leave it as auto
+standby_file_management:          "auto"
+
+#-- Fast Start Failover Related
+fsfo_enabled:                     true  ## Set to true to configure FSFO
+fsfo_protection_mode:             "MAXAVAILABILITY"
+
+#-- Operating System Level Packages to be installed/crosschecked
+preinstall_os_pkg:               
+- bc
+- binutils 
+- elfutils-libelf 
+- elfutils-libelf-devel 
+- fontconfig-devel 
+- gcc
+- glibc 
+- glibc-devel 
+- kmod 
+- kmod-libs 
+- ksh 
+- libX11 
+- libXau 
+- libXi 
+- libXrender 
+- libXtst 
+- libaio 
+- libaio-devel 
+- libgcc 
+- libibverbs 
+- libnsl 
+- librdmacm 
+- libstdc++ 
+- libstdc++-devel 
+- libxcb 
+- make 
+- net-tools 
+- nfs-utils 
+- policycoreutils 
+- policycoreutils-python-utils 
+- psmisc 
+- smartmontools 
+- sysstat 
+- dnf-utils 
+- zip 
+- unzip 
+- sshpass 
+- oracle-database-preinstall-19c
+
+
+
+###   ****** End of Database Servers ( Primary/Standby) Related Configuration  ******* #######
+
+
+
+###   ****** Begining of Observer Servers Related Configuration  ******* #######
+
+#-- Observer Operating System Level Variables
+observer_os_major_version:       "9"
+observer_min_memory_in_mb:       5000 # 16384
+observer_min_swap_in_mb:         5000 # 16384
+observer_min_orahome_diskspace_in_mb:     5000 # 51200
+observer_root_user:               root
+
+#-- Directory for observer start/stop script and fsfo dat/log files
+observer_script_dir:              /u01/app/oracle/fsfo 
+#-- Directory for observer tns file
+observer_tns_dir:                 /u01/app/oracle/fsfo_tns  
+
+#-- Oracle Client installation related in Observer servers
+observer_user:                    oracle
+observer_install_group:           oinstall
+observer_oracle_mount_dir:       /u01
+observer_stage_dir:              /u01/stage
+observer_oracle_base:            /u01/app/oracle
+observer_oracle_home_version:    19.26.0.0.0
+observer_oracle_home:            /u01/app/oracle/product/{{ observer_oracle_home_version }}/client
+observer_oracle_inventory:       /u01/app/oraInventory 
+observer_oracle_install_group:   oinstall
+observer_oracle_user:            oracle
+#-- Type of Client to install in Observer servers, ideal to leave it as Administrator
+observer_oracle_client_install_type:   Administrator
+#-- Name of the response file as in  roles/client-install/templates directory 
+observer_ora_client_soft_rsp:    "19c_Client_Response"    # Response file name
+#-- Oracle Client binary name  as in  roles/client-install-pre/files directory 
+observer_oracle_client_binary:             "LINUX.X64_193000_client_home.zip"
+#-- Flag file name to avoid unzipping the binary multipletimes, incase had to rerun the play again
+#-- For e.g runInstaller is the file name that would be present after unzipping in the target directory
+observer_oracle_client_binary_flagFile:    "{{ observer_oracle_home }}/runInstaller"
+#-- Oracle preinstall package name  as in  roles/client-install-pre/files directory 
+observer_preinstall_pkg:                  "oracle-database-preinstall-19c-1.0-1.el9.x86_64.rpm"
+
+#-- Observer Oracle Patching related
+#-- Oracle OPatch binary name  as in  roles/client-install-pre/files directory 
+observer_oracle_opatch_binary:            "p6880880_190000_Linux-x86-64.zip"
+#-- Oracle Minimum OPatch Version required to apply required patch
+observer_oracle_opatch_version:           "12.2.0.1.45"
+#-- Required Oracle RU  binary name  as in  roles/client-install-pre/files directory 
+observer_oracle_patch_binary:        "p37260974_190000_Linux-x86-64.zip"   ##19.26
+#-- Directory in target server to unzip the patch binaries
+observer_oracle_patch_stage_dir:     "{{ observer_stage_dir }}/37260974"
+observer_oracle_oneoff_patch_stage_dir:    "{{ observer_stage_dir }}/37260974"
+#-- Flag file name to avoid unzipping the binary multipletimes, incase had to rerun the play again
+#-- For e.g README.html is the file name that would be present after unzipping in the target directory
+observer_oracle_patch_flagFile:      "{{ observer_stage_dir }}/37260974/README.html"
+#-- Flag file name to avoid installing the binary , incase had to rerun the play again
+#-- For e.g install_ansible_flag.txt  is the file name 
+#-- the ansible-play creates to avoid installing oracle Client
+#-- If you are to run play book on already existing Client home that was not created by 
+#-- this ansible-play then please manually create an empty file
+#-- *** This is must otherwise ansible will try to install Client again  ****
+observer_oracle_installed_flagFile:        "{{ observer_oracle_home }}/install_ansible_flag.txt"
+
+#-- Operating System Level Packages to be installed/crosschecked
+observer_preinstall_os_pkg:               
+- bc
+- glibc 
+- glibc-devel 
+- ksh 
+- libaio 
+- libgcc 
+- libnsl 
+- libstdc++ 
+- libstdc++-devel 
+- make 
+- sysstat 
+- zip 
+- unzip 
+- sshpass 
+- libnsl.i686
+- unixODBC
+
+###   ****** End of Observer Servers Related Configuration  ******* #######

@@ -1,0 +1,17 @@
+SET HEADING OFF;
+SET FEEDBACK OFF;
+SELECT
+    LISTAGG (DB_UNIQUE_NAME, ',') WITHIN GROUP (
+        ORDER BY
+            1
+    ) AS LIST
+FROM
+    V$DATAGUARD_CONFIG
+WHERE
+    DB_UNIQUE_NAME <> (
+        SELECT
+            DB_UNIQUE_NAME
+        FROM
+            V$DATABASE
+    ) 
+/

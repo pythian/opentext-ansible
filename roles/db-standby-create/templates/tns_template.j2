@@ -1,0 +1,21 @@
+# TNS configuration for Primary and Standby Hosts
+
+{% for item in [primary_host] + standby_hosts %}
+{{ hostvars[item].database_unique_name }} =
+  (DESCRIPTION =
+    (ADDRESS_LIST =
+      (ADDRESS = (PROTOCOL = TCP)(HOST = {{ hostvars[item].ansible_host }})(PORT = {{ hostvars[item].listener_port }} ))
+    )
+    (CONNECT_DATA =
+      (SERVICE_NAME = {{ hostvars[item].database_unique_name }}.{{ hostvars[item].db_domain }})
+      (SID = {{ hostvars[item].database_unique_name }})
+    )
+  )
+{% endfor %}
+
+{{ listener_name }} =
+  (DESCRIPTION_LIST =
+    (DESCRIPTION =
+      (ADDRESS = (PROTOCOL = TCP)(HOST = {{ ansible_hostname }}.{{ db_domain }})(PORT = {{ listener_port }} ))
+    )
+  )

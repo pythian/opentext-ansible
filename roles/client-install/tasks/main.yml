@@ -1,0 +1,131 @@
+---
+- name: client-install | display client software install message
+  remote_user: "{{ observer_root_user }}"
+  debug:
+    msg:
+      - 'Oracle Client Software Installation tasks started for Single Instance at {{ansible_date_time.iso8601}}:'
+
+
+#######################OPatch Releated Starts Here #################################################
+# Get current OPatch version, if it is < expected OPatch version
+# then take backup of OPatch and replace with new OPatch
+# Get and display new OPatch version
+
+- name: client-install | Get opatch version 
+  remote_user: "{{ observer_root_user }}"
+  become: yes
+  become_user: "{{ observer_oracle_user }}"
+  shell: "cd {{ observer_oracle_home }}/OPatch; ./opatch version | awk '{print $3}' " #" | sed 's/\\.//g' | cut -c1-7 "
+  register: get_opatch_version
+
+- set_fact:
+    current_opatch_version: "{{ get_opatch_version.stdout }}"
+    new_opatch_version: "{{ observer_oracle_opatch_version }}"
+
+
+- name: client-install | display opatch patch readiness
+  ansible.builtin.debug:
+   msg: "Current OPatch Version is {{ current_opatch_version }}, minimum required OPatch Version is {{ new_opatch_version }}."  
+
+
+- name: client-install | creating opatch backup    
+  command: mv "{{ observer_oracle_home }}/OPatch" "{{ observer_oracle_home }}/OPatch_BKP_{{ansible_date_time.date}}_{{ansible_date_time.epoch}}"
+  when: current_opatch_version  is version(new_opatch_version, '<')
+
+
+- name: client-install | Patch Oracle OPatch Binaries on the target server
+  when: current_opatch_version  is version(new_opatch_version, '<')
+  remote_user: "{{ observer_root_user }}"
+  become: yes
+  become_user: "{{ observer_oracle_user }}"
+  unarchive:
+     src={{ observer_stage_dir }}/{{ item }}
+     dest="{{ observer_oracle_home }}"
+     remote_src=yes
+     mode=0775
+     group="{{ observer_oracle_install_group }}"
+     owner="{{ observer_oracle_user }}"
+  with_items:
+     - "{{ observer_oracle_opatch_binary }}"     
+  tags:
+   - db_unpackdbsoftware  
+
+- name: client-install | Get new opatch version 
+  remote_user: "{{ observer_root_user }}"
+  become: yes
+  become_user: "{{ observer_oracle_user }}"
+  shell: "cd {{ observer_oracle_home }}/OPatch; ./opatch version | awk '{print $3}' " #" | sed 's/\\.//g' | cut -c1-7 "
+  register: get_opatch_version
+  when: current_opatch_version  is version(new_opatch_version, '<')
+
+- name: client-install | Display new  opatch version
+  debug:
+    msg: "Current OPatch Version: {{ get_opatch_version.stdout }}"
+  when: current_opatch_version  is version(new_opatch_version, '<')
+
+#######################OPatch Releated Ends Here #################################################  
+
+
+#######################Oracle Client Install Releated Starts Here #################################################
+
+- name: client-install | Setup Oracle Software silent response file
+  when: inventory_hostname in groups['observer']
+  remote_user: "{{ observer_root_user }}"
+  become: yes
+  become_user: "{{ observer_oracle_user }}"
+  template: src=roles/client-install/templates/{{ observer_ora_client_soft_rsp }}.rsp.j2 dest={{ observer_stage_dir }}/{{ observer_ora_client_soft_rsp }}.rsp mode=0755
+  tags:
+   - db_setuprspfile
+
+- name: client-install | Check if Oracle Client already installed
+  stat:
+    path: "{{ observer_oracle_installed_flagFile }}"
+  register: installed_stat_result
+  tags:
+   - dbsoft_install
+
+
+- name: client-install | Install Oracle Client Software with RU
+  when: observer_install_client and inventory_hostname in groups['observer'] and not installed_stat_result.stat.exists
+  remote_user: "{{ observer_root_user }}"
+  become: yes
+  become_user: "{{ observer_oracle_user }}"
+  shell: "export CV_ASSUME_DISTID=OEL7.8 ; {{ observer_oracle_home }}/runInstaller -silent -responseFile {{ observer_stage_dir }}/{{ observer_ora_client_soft_rsp }}.rsp -ignorePrereqFailure -waitforcompletion -applyRU {{ observer_oracle_patch_stage_dir }} \ "
+  #shell: "export CV_ASSUME_DISTID=OEL7.8 ; {{ observer_oracle_home }}/runInstaller -silent -responseFile {{ observer_stage_dir }}/{{ observer_ora_client_soft_rsp }}.rsp  -waitforcompletion  \ " #" -ignorePrereqFailure"
+  ignore_errors: False
+  tags:
+   - dbsoft_install
+
+- name: client-install | Execute orainstRoot.sh
+  when: observer_install_client and inventory_hostname in groups['observer'] and not installed_stat_result.stat.exists
+  remote_user: "{{ observer_root_user }}"
+  shell: "{{ observer_oracle_inventory }}/orainstRoot.sh -silent"
+  ignore_errors: True
+  tags:
+   - db_exeroot
+
+- name: client-install | Execute root.sh
+  when: observer_install_client and inventory_hostname in groups['observer'] and not installed_stat_result.stat.exists
+  remote_user: "{{ observer_root_user }}"
+  shell: "{{ observer_oracle_home }}/root.sh -silent"
+  ignore_errors: True
+  tags:
+   - db_exeroot
+
+
+
+- name: client-install | Create Installation status flag file
+  when: observer_install_client
+  copy:
+    content: "COMPLETED"
+    dest: "{{ observer_oracle_installed_flagFile }}"
+    force: false
+    mode: 0444
+
+#######################Oracle Client Install Releated Ends Here #################################################
+
+- name: client-install | display post install message
+  debug:
+    msg:
+      - 'Oracle Client Software Installation tasks completed at {{ansible_date_time.iso8601}}:'
+
