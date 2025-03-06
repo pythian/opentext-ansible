@@ -1,0 +1,5 @@
+- hosts: dbservers
+  user: root_suer
+  
+  roles:
+   - db-standby-create

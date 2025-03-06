@@ -1,0 +1,8 @@
+---
+- name: Display ansible_host for each host
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Show ansible_host for the host
+      debug:
+        msg: "Host Name {{ inventory_hostname }} in inventory file {{ inventory_file }} is referencing to server {{ ansible_host }}"

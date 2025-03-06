@@ -1,0 +1,4 @@
+- hosts: dbservers
+  user: root_user
+  roles:
+   - db-rdbms-install-pre

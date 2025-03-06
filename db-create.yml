@@ -1,0 +1,5 @@
+- hosts: primary
+  user: root_user
+  
+  roles:
+   - db-create

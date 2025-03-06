@@ -1,0 +1,36 @@
+all:
+  children:
+    dbservers:
+      children:
+        demo:
+          children:
+            primary:
+              hosts:
+                demoA:
+                  ## values specific to demo primary 
+                  ansible_port: 22
+                  ansible_host: testA
+                  ansible_ssh_user: root
+                  ansible_ssh_private_key_file: /Users/ponnilavandhayanithi/.ssh/id_testA
+                  database_unique_name: demoA
+                  fsfo_target: demoB ## Set if FSFO to be configured. FSFO standy targets (database unique names) sperated by , if more than one
+            standby:
+              ## values specific to demo standby databases  
+              hosts:
+                demoB:
+                  ansible_port: 22
+                  ansible_host: testB
+                  ansible_ssh_user: root
+                  ansible_ssh_private_key_file: /Users/ponnilavandhayanithi/.ssh/id_testB
+                  database_unique_name: demoB
+                  active_data_guard: true ## boolean true or false, Should the standby be read only or not
+                  fsfo_target: demoA ## Set if FSFO to be configured. FSFO standy targets (database unique names) sperated by , if more than one
+            observer: ## Observer Server if FSFO to be configured
+              hosts:
+                demoX:
+                  ansible_port: 22
+                  ansible_host: testX
+                  ansible_ssh_user: root
+                  ansible_ssh_private_key_file: /Users/ponnilavandhayanithi/.ssh/id_testA
+
+

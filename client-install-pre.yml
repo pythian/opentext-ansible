@@ -1,0 +1,4 @@
+- hosts: observer
+  user: observer_root_user
+  roles:
+   - client-install-pre

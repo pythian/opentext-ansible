@@ -1,0 +1,174 @@
+---
+# Set the environment variables
+- name: build-db-estate | Load environment-specific variables
+  hosts: dbservers
+  gather_facts: no
+  tasks:
+    - name: Show environment file name
+      debug:
+        msg: "Loading environment variables from: group_vars/{{ db_env }}.yml"
+      when: db_env is defined
+      run_once: true  
+
+    - name: Include environment-specific group vars
+      include_vars:
+        file: "group_vars/{{ db_env }}.yml"
+
+# Perform RDBMS PreInstall Validations
+- name: build-db-estate | Preinstall Validations
+  hosts: primary:standby ## play needs to run on both primary and standby
+  pre_tasks:
+    - name: Check to run play db-rdbms-install-pre
+      block:
+      - name: display skip play db-rdbms-install-pre 
+        debug:
+          msg: "Skipping rdbms preinstall validations because install_rdbms is set to false in environment file group_vars/{{ db_env }}.yml"
+      
+      - name: skip play db-rdbms-install-pre if install_rdbms is false
+        meta: end_play
+      when: install_rdbms is defined and not install_rdbms  
+      run_once: true  
+  roles:
+    - db-rdbms-install-pre
+
+# Install Oracle RDBMS with RU
+- name: build-db-estate | Install RDBMS 
+  hosts: primary:standby ## play needs to run on both primary and standby
+  pre_tasks:
+    - name: Check to run play db-rdbms-install
+      block:
+      - name: display skip play db-rdbms-install
+        debug:
+          msg: "Skipping rdbms install validations because install_rdbms is set to false in environment file group_vars/{{ db_env }}.yml"
+      
+      - name: skip play db-rdbms-install if install_rdbms is false
+        meta: end_play
+      when: install_rdbms is defined and not install_rdbms  
+      run_once: true    
+  roles:
+    - db-rdbms-install
+
+
+# Validate and Create Listeners
+- name: build-db-estate | Create Listeners
+  hosts: primary:standby ## play needs to run on both primary and standby
+  pre_tasks:
+    - name: Check to run play lsnr-create
+      block:
+      - name: display skip play lsnr-create
+        debug:
+          msg: "Skipping listener create because create_listener is set to false in environment file group_vars/{{ db_env }}.yml"
+      
+      - name: skip play lsnr-create if create_listener is false
+        meta: end_play
+      when: create_listener is defined and not create_listener  
+      run_once: true 
+  roles:
+    - lsnr-create
+
+# Create Primary database
+- name: build-db-estate | Create primary db 
+  hosts: primary ## play needs to run only on primary 
+  pre_tasks:
+    - name: Check to run play db-create
+      block:
+      - name: display skip play db-create
+        debug:
+          msg: "Skipping primary db create because create_db is set to false in environment file group_vars/{{ db_env }}.yml"
+      
+      - name: skip play db-create if create_db is false
+        meta: end_play
+      when: create_db is defined and not create_db  
+      run_once: true 
+  roles:
+    - db-create
+
+# Create Standby database
+- name: build-db-estate | Build standby db
+  hosts: primary:standby ## play needs to run on both primary and standby
+  pre_tasks:
+    - name: Check to run play db-standby-create
+      block:
+      - name: display skip play db-standby-create
+        debug:
+          msg: "Skipping standby db create because create_standby_db is set to false in environment file group_vars/{{ db_env }}.yml"
+      
+      - name: skip play db-standby-create if create_standby_db is false
+        meta: end_play
+      when: create_standby_db is defined and not create_standby_db  
+      run_once: true 
+  roles:    
+    - db-standby-create
+
+# Perform Oracle Client PreInstall Validations
+- name: build-db-estate | Client Preinstall Validations
+  hosts: observer ## play needs to run only on observer
+  pre_tasks:
+    - name: Check to run play client-install-pre
+      block:
+      - name: display skip play client-install-pre
+        debug:
+          msg: "Skipping oracle client install prevalidations because observer_install_client is set to false in environment file group_vars/{{ db_env }}.yml"
+      
+      - name: skip play client-install-pre if observer_install_client is false
+        meta: end_play
+      when: observer_install_client is defined and not observer_install_client       
+      run_once: true         
+  roles:
+    - client-install-pre
+
+# Install Oracle Client 
+- name: build-db-estate | Install Client
+  hosts: observer ## play needs to run only on observer
+  pre_tasks:
+    - name: Check to run play client-install
+      block:
+      - name: display skip play client-install
+        debug:
+          msg: "Skipping oracle client install because observer_install_client is set to false in environment file group_vars/{{ db_env }}.yml"
+      
+      - name: skip play client-install if observer_install_client is false
+        meta: end_play
+      when: observer_install_client is defined and not observer_install_client       
+      run_once: true         
+  roles:
+    - client-install
+
+# Configure DataGurad Broker and enable FSFO
+- name: build-db-estate | Configure DG Broker
+  hosts: dbservers ## play needs to run on primary,  standby and few steps in observer servers         
+  pre_tasks:
+    - name: Check to run play db-dgbroker-config
+      block:
+      - name: display skip play db-dgbroker-config
+        debug:
+          msg: "Skipping DG broker configuration because configure_dgbroker is set to false in environment file group_vars/{{ db_env }}.yml"
+      
+      - name: skip play db-dgbroker-config if configure_dgbroker is false
+        meta: end_play
+      when: configure_dgbroker  is defined and not configure_dgbroker 
+      run_once: true          
+  roles:    
+    - db-dgbroker-config 
+
+# Configure RMAN Properties
+- name: build-db-estate | Configure RMAN 
+  hosts: primary:standby ## play needs to run on both primary and standby
+  pre_tasks:
+    - name: Check to run play db-rman-config
+      block:
+      - name: display skip play db-rman-config
+        debug:
+          msg: "Skipping RMAN property configuration because configure_rman_property is set to false in environment file group_vars/{{ db_env }}.yml"
+      
+      - name: skip play db-rman-config if configure_rman_property is false
+        meta: end_play
+      when: configure_rman_property  is defined and not configure_rman_property    
+      run_once: true         
+  roles:
+    - db-rman-config
+
+
+
+
+
