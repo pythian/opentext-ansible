@@ -138,7 +138,7 @@ olap:                             false
 #-- Database Init Parameters related 
 #-- Percentage of free huges pages to use as SGA
 #-- In this case 95% of available huge pages will  be allocated as SGA
-sga_target_pct:                   40 
+sga_target_pct:                   95 
 #-- Not in use sga_target:                      "2048M"
 #-- Size of PGA in MB
 pga_aggtar:                       "256M"
