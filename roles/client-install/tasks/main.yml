@@ -23,21 +23,21 @@
 
 - set_fact:
     current_opatch_version: "{{ get_opatch_version.stdout }}"
-    new_opatch_version: "{{ observer_oracle_opatch_version }}"
+    expected_opatch_version: "{{ observer_oracle_opatch_version }}"
 
 
 - name: client-install | display opatch patch readiness
   ansible.builtin.debug:
-   msg: "Current OPatch Version is {{ current_opatch_version }}, minimum required OPatch Version is {{ new_opatch_version }}."  
+   msg: "Current OPatch Version is {{ current_opatch_version }}, minimum required OPatch Version is {{ expected_opatch_version }}."  
 
 
 - name: client-install | creating opatch backup    
   command: mv "{{ observer_oracle_home }}/OPatch" "{{ observer_oracle_home }}/OPatch_BKP_{{ansible_date_time.date}}_{{ansible_date_time.epoch}}"
-  when: current_opatch_version  is version(new_opatch_version, '<') and not skip_install
+  when: current_opatch_version  is version(expected_opatch_version, '<') and not skip_install
 
 
 - name: client-install | Patch Oracle OPatch Binaries on the target server
-  when: current_opatch_version  is version(new_opatch_version, '<') and not skip_install
+  when: current_opatch_version  is version(expected_opatch_version, '<') and not skip_install
   remote_user: "{{ observer_root_user }}"
   become: yes
   become_user: "{{ observer_oracle_user }}"
@@ -59,17 +59,23 @@
   become_user: "{{ observer_oracle_user }}"
   shell: "cd {{ observer_oracle_home }}/OPatch; ./opatch version | awk '{print $3}' " #" | sed 's/\\.//g' | cut -c1-7 "
   register: get_opatch_version
-  when: current_opatch_version  is version(new_opatch_version, '<') and not skip_install
+  when: current_opatch_version  is version(expected_opatch_version, '<') and not skip_install
+
+- name: client-install | Set new opatch version 
+  set_fact:
+    current_opatch_version: "{{ get_opatch_version.stdout }}"
+  when: current_opatch_version  is version(expected_opatch_version, '<') and not skip_install    
+
 
 - name: client-install | Display new  opatch version
   debug:
     msg: "Current OPatch Version: {{ get_opatch_version.stdout }}"
-  when: current_opatch_version  is version(new_opatch_version, '<') and not skip_install
+  when: current_opatch_version  is version(expected_opatch_version, '<') and not skip_install
 
 - name: client-install | Stop play if OPatch version is outdated
   fail:
-    msg: "Stopping playbook: OPatch version is still outdated ({{ get_opatch_version.stdout }} < {{ new_opatch_version }})"
-  when: current_opatch_version is version(new_opatch_version, '<')  and not skip_install
+    msg: "Stopping playbook: OPatch version is still outdated ({{ get_opatch_version.stdout }} < {{ expected_opatch_version }})"
+  when: current_opatch_version is version(expected_opatch_version, '<')  and not skip_install
 
 #######################OPatch Releated Ends Here #################################################  
 

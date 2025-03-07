@@ -62,7 +62,7 @@
   register: get_opatch_version
   when: current_opatch_version  is version(expected_opatch_version, '<') and not skip_install
 
-- name: db-rdbms-install | Get new opatch version 
+- name: db-rdbms-install | Set new opatch version 
   set_fact:
     current_opatch_version: "{{ get_opatch_version.stdout }}"
   when: current_opatch_version  is version(expected_opatch_version, '<') and not skip_install    
