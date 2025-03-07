@@ -115,8 +115,8 @@ pdb_prefix:
 charset:                          AL32UTF8
 ncharset:                         AL16UTF16
 #-- SYS/SYSTEM User credential when creating database
-systemPassword:                   "hACtt0YlMAiAsMnh"
-sysPassword:                      "hACtt0XlMAiAsMnh"
+systemPassword:                   "******"
+sysPassword:                      "***********"
 
 
 #-- Database Components to configure when creating database
