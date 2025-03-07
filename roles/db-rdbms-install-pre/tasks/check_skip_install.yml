@@ -1,0 +1,53 @@
+---
+- name: db-rdbms-install-pre | Initialize skip_install to false
+  set_fact:
+    skip_install: false
+
+      
+- name: db-rdbms-install-pre | Check if the Oracle Software exists
+  stat:
+    path: "{{ oracle_home }}/bin/oracle"
+  register: oracle_file_stat
+  failed_when: false  # Prevent failure if the file doesn't exist
+
+- name: db-rdbms-install-pre | Set oracle_software_06751 fact based on file mode
+  set_fact:
+    oracle_software_06751: "{{ oracle_file_stat.stat.mode == '6751' and oracle_file_stat.stat.exists }}"
+  when: oracle_file_stat.stat.exists  # Only set if file exists
+
+- name: db-rdbms-install-pre | Check if inventory.xml exists
+  stat:
+    path: "{{ oracle_inventory }}/ContentsXML/inventory.xml"
+  register: inventory_xml_stat
+  failed_when: false  # Prevent failure if the file doesn't exist
+
+- name: db-rdbms-install-pre | Check if oracle_home exists in inventory.xml
+  slurp:
+    src: "{{ oracle_inventory }}/ContentsXML/inventory.xml"
+  register: inventory_xml
+  failed_when: false  # Prevent failure if the file doesn't exist
+  when: inventory_xml_stat.stat.exists
+
+- name: db-rdbms-install-pre | Decode inventory.xml content
+  set_fact:
+    inventory_xml_content: "{{ inventory_xml.content | b64decode }}"
+  when: inventory_xml_stat.stat.exists
+
+- name: db-rdbms-install-pre | Check if oracle home exists in inventory.xml
+  set_fact:
+    oracle_home_exists: "{{ inventory_xml_content is search(oracle_home) }}"
+  when: inventory_xml_stat.stat.exists  # Only set if inventory.xml exists
+  failed_when: false  # Prevent failure if the file doesn't exist
+
+- name: db-rdbms-install-pre | Set global fact to stop play if Oracle Home exists or Oracle Software is in 06751 mode
+  set_fact:
+    skip_install: true
+  when: 
+    - (oracle_home_exists is defined and oracle_home_exists) or (oracle_software_06751 is defined and oracle_software_06751)
+  
+
+- name: db-rdbms-install-pre | Show skip status for host
+  debug:
+    msg: "Skipping installation on this host: {{ inventory_hostname }}"
+  when: skip_install
+  
