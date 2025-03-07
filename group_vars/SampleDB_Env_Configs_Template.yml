@@ -1,14 +1,14 @@
 ###   ****** Begining of Database Servers ( Primary/Standby) Related Configuration  ******* #######
 
 #-- Control Flags in building the DB environment
-create_db:                        false #-- Set it to false to avoid creating Primary DB
-create_standby_db:                false #-- Set it to false to avoid creating Standby DB
-create_listener:                  false #-- Set it to false to avoid creating Listener
-install_rdbms:                    false #-- Set it to false to avoid Installing Oracle RDBMS
-observer_install_client:          false #-- Set it to false to avoid Installing Oracle Client
+create_db:                        true #-- Set it to false to avoid creating Primary DB
+create_standby_db:                true #-- Set it to false to avoid creating Standby DB
+create_listener:                  true #-- Set it to false to avoid creating Listener
+install_rdbms:                    true #-- Set it to false to avoid Installing Oracle RDBMS
+observer_install_client:          true #-- Set it to false to avoid Installing Oracle Client
 configure_dgbroker:               true #-- Set it to true to configure DG broker, Add DB to DG broker, Configure FSFO etc
 fsfo_enabled:                     true #-- Set to true to configure FSFO
-configure_rman_property:          false #-- Set it to true to configure rman properties
+configure_rman_property:          true #-- Set it to true to configure rman properties
 
 #-- Operating System Level Variables
 
