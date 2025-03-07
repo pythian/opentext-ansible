@@ -1,4 +1,7 @@
 ---
+
+- include_tasks: "../../client-install-pre/tasks/check_skip_install.yml"
+
 - name: client-install | display client software install message
   remote_user: "{{ observer_root_user }}"
   debug:
@@ -30,11 +33,11 @@
 
 - name: client-install | creating opatch backup    
   command: mv "{{ observer_oracle_home }}/OPatch" "{{ observer_oracle_home }}/OPatch_BKP_{{ansible_date_time.date}}_{{ansible_date_time.epoch}}"
-  when: current_opatch_version  is version(new_opatch_version, '<')
+  when: current_opatch_version  is version(new_opatch_version, '<') and not skip_install
 
 
 - name: client-install | Patch Oracle OPatch Binaries on the target server
-  when: current_opatch_version  is version(new_opatch_version, '<')
+  when: current_opatch_version  is version(new_opatch_version, '<') and not skip_install
   remote_user: "{{ observer_root_user }}"
   become: yes
   become_user: "{{ observer_oracle_user }}"
@@ -56,12 +59,17 @@
   become_user: "{{ observer_oracle_user }}"
   shell: "cd {{ observer_oracle_home }}/OPatch; ./opatch version | awk '{print $3}' " #" | sed 's/\\.//g' | cut -c1-7 "
   register: get_opatch_version
-  when: current_opatch_version  is version(new_opatch_version, '<')
+  when: current_opatch_version  is version(new_opatch_version, '<') and not skip_install
 
 - name: client-install | Display new  opatch version
   debug:
     msg: "Current OPatch Version: {{ get_opatch_version.stdout }}"
-  when: current_opatch_version  is version(new_opatch_version, '<')
+  when: current_opatch_version  is version(new_opatch_version, '<') and not skip_install
+
+- name: client-install | Stop play if OPatch version is outdated
+  fail:
+    msg: "Stopping playbook: OPatch version is still outdated ({{ get_opatch_version.stdout }} < {{ new_opatch_version }})"
+  when: current_opatch_version is version(new_opatch_version, '<')  and not skip_install
 
 #######################OPatch Releated Ends Here #################################################  
 
@@ -69,7 +77,7 @@
 #######################Oracle Client Install Releated Starts Here #################################################
 
 - name: client-install | Setup Oracle Software silent response file
-  when: inventory_hostname in groups['observer']
+  when: inventory_hostname in groups['observer'] and not skip_install
   remote_user: "{{ observer_root_user }}"
   become: yes
   become_user: "{{ observer_oracle_user }}"
@@ -86,7 +94,7 @@
 
 
 - name: client-install | Install Oracle Client Software with RU
-  when: observer_install_client and inventory_hostname in groups['observer'] and not installed_stat_result.stat.exists
+  when: observer_install_client and inventory_hostname in groups['observer'] and not installed_stat_result.stat.exists and not skip_install
   remote_user: "{{ observer_root_user }}"
   become: yes
   become_user: "{{ observer_oracle_user }}"
@@ -97,7 +105,7 @@
    - dbsoft_install
 
 - name: client-install | Execute orainstRoot.sh
-  when: observer_install_client and inventory_hostname in groups['observer'] and not installed_stat_result.stat.exists
+  when: observer_install_client and inventory_hostname in groups['observer'] and not installed_stat_result.stat.exists and not skip_install
   remote_user: "{{ observer_root_user }}"
   shell: "{{ observer_oracle_inventory }}/orainstRoot.sh -silent"
   ignore_errors: True
@@ -105,7 +113,7 @@
    - db_exeroot
 
 - name: client-install | Execute root.sh
-  when: observer_install_client and inventory_hostname in groups['observer'] and not installed_stat_result.stat.exists
+  when: observer_install_client and inventory_hostname in groups['observer'] and not installed_stat_result.stat.exists and not skip_install
   remote_user: "{{ observer_root_user }}"
   shell: "{{ observer_oracle_home }}/root.sh -silent"
   ignore_errors: True

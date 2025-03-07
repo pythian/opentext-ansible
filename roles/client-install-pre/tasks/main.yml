@@ -180,9 +180,10 @@
    - db_binary
   ignore_errors: false 
 
-
+- include_tasks: check_skip_install.yml
+  
 - name: client-install-pre | Unpack Oracle Client Binaries on the target server
-  when: inventory_hostname in groups['observer']
+  when: inventory_hostname in groups['observer'] and not skip_install
   remote_user: "{{ observer_root_user }}"
   become: yes
   become_user: "{{ observer_oracle_user }}"
@@ -202,7 +203,7 @@
 
 
 - name: client-install-pre | Unpack Oracle Patch Binaries on the target server
-  when: inventory_hostname in groups['observer']
+  when: inventory_hostname in groups['observer']  and not skip_install
   remote_user: "{{ observer_root_user }}"
   become: yes
   become_user: "{{ observer_oracle_user }}"

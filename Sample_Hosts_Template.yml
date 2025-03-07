@@ -1,25 +1,79 @@
+# Tree format for host file 
+# all
+# |----- children
+# |   |----- dbservers
+# |       |----- children
+# |       |   |----- test
+# |       |   |   |----- children
+# |       |   |   |   |----- primary
+# |       |   |   |   |   |----- hosts
+# |       |   |   |   |       |----- av1c8amuod01
+# |       |   |   |   |           |----- ansible_port: 22
+# |       |   |   |   |           |----- ansible_host: av1c8amuod01
+# |       |   |   |   |           |----- ansible_ssh_user: root
+# |       |   |   |   |           |----- ansible_ssh_private_key_file: /covisint/working/ansible_project/.ssh/id_rsa_av1c8amuod01
+# |       |   |   |   |           |----- database_unique_name: testA
+# |       |   |   |   |           |----- fsfo_target: testB,testC
+# |       |   |   |   |----- standby
+# |       |   |   |       |----- hosts
+# |       |   |   |           |----- av1c8amuod02
+# |       |   |   |           |   |----- ansible_port: 22
+# |       |   |   |           |   |----- ansible_host: av1c8amuod02
+# |       |   |   |           |   |----- ansible_ssh_user: root
+# |       |   |   |           |   |----- ansible_ssh_private_key_file: /covisint/working/ansible_project/.ssh/id_rsa_av1c8amuod02
+# |       |   |   |           |   |----- database_unique_name: testB
+# |       |   |   |           |   |----- active_data_guard: true
+# |       |   |   |           |   |----- fsfo_target: testA,testC
+# |       |   |   |           |----- av1c8amuod03
+# |       |   |   |           |   |----- ansible_port: 22
+# |       |   |   |           |   |----- ansible_host: av1c8amuod03
+# |       |   |   |           |   |----- ansible_ssh_user: root
+# |       |   |   |           |   |----- ansible_ssh_private_key_file: /covisint/working/ansible_project/.ssh/id_rsa_av1c8amuod03
+# |       |   |   |           |   |----- database_unique_name: testC
+# |       |   |   |           |   |----- active_data_guard: false
+# |       |   |   |           |   |----- fsfo_target: testA,testB
+# |       |   |   |   |----- observer
+# |       |   |   |       |----- hosts
+# |       |   |   |           |----- av1c8emuod01
+# |       |   |   |           |   |----- ansible_port: 22
+# |       |   |   |           |   |----- ansible_host: av1c8emuod01
+# |       |   |   |           |   |----- ansible_ssh_user: root
+# |       |   |   |           |   |----- ansible_ssh_private_key_file: /covisint/working/ansible_project/.ssh/id_rsa_av1c8emuod01
+# |       |   |   |           |----- av1c8emuod02
+# |       |   |   |           |   |----- ansible_port: 22
+# |       |   |   |           |   |----- ansible_host: av1c8emuod02
+# |       |   |   |           |   |----- ansible_ssh_user: root
+# |       |   |   |           |   |----- ansible_ssh_private_key_file: /covisint/working/ansible_project/.ssh/id_rsa_av1c8emuod02
+# |       |   |   |           |----- av1c8emuod03
+# |       |   |   |           |   |----- ansible_port: 22
+# |       |   |   |           |   |----- ansible_host: av1c8emuod03
+# |       |   |   |           |   |----- ansible_ssh_user: root
+# |       |   |   |           |   |----- ansible_ssh_private_key_file: /covisint/working/ansible_project/.ssh/id_rsa_av1c8emuod03
+# |----- dbservers
+
 all:
   children:
     dbservers:
+      ## Variables global to test database (primary and standby)
       children:
-        demo:
+        test:
           children:
             primary:
               hosts:
-                demoA:
-                  ## values specific to demo primary 
+                av1c8amuod01:
+                  ## values specific to test primary 
                   ansible_port: 22
-                  ansible_host: testA
+                  ansible_host: av1c8amuod01
                   ansible_ssh_user: root
                   ansible_ssh_private_key_file: ~/.ssh/id_testA
                   database_unique_name: demoA
                   fsfo_target: demoB ## Set if FSFO to be configured. FSFO standy targets (database unique names) sperated by , if more than one
             standby:
-              ## values specific to demo standby databases  
+              ## values specific to test standby databases  
               hosts:
-                demoB:
+                av1c8amuod02:
                   ansible_port: 22
-                  ansible_host: testB
+                  ansible_host: av1c8amuod02
                   ansible_ssh_user: root
                   ansible_ssh_private_key_file: ~/.ssh/id_testB
                   database_unique_name: demoB
@@ -27,10 +81,20 @@ all:
                   fsfo_target: demoA ## Set if FSFO to be configured. FSFO standy targets (database unique names) sperated by , if more than one
             observer: ## Observer Server if FSFO to be configured
               hosts:
-                demoX:
+                av1c8emuod01:
                   ansible_port: 22
-                  ansible_host: testX
+                  ansible_host: av1c8emuod01
                   ansible_ssh_user: root
                   ansible_ssh_private_key_file: ~/.ssh/id_testA
 
+                av1c8emuod02:
+                  ansible_port: 22
+                  ansible_host: av1c8emuod02
+                  ansible_ssh_user: root
+                  ansible_ssh_private_key_file: /covisint/working/ansible_project/.ssh/id_rsa_av1c8emuod02
 
+                av1c8emuod03:
+                  ansible_port: 22
+                  ansible_host: av1c8emuod03
+                  ansible_ssh_user: root
+                  ansible_ssh_private_key_file: /covisint/working/ansible_project/.ssh/id_rsa_av1c8emuod03

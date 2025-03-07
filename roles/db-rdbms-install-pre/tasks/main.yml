@@ -374,7 +374,7 @@
     state: permissive
   when: ansible_facts.selinux.status == 'enabled'
 
-- name: db-rdbms-install-pre | Copy Oracle Binaries to target database server
+- name: db-rdbms-install-pre | Copy Oracle Software to target database server
   when: inventory_hostname in groups['dbservers']  
   copy: src=roles/db-rdbms-install-pre/files/{{ item }} dest={{ stage_dir }} mode=0755 force=true owner="{{ oracle_user }}" group="{{ oracle_install_group }}"    
   with_items:
@@ -385,9 +385,10 @@
    - db_binary
   ignore_errors: false 
 
-
-- name: db-rdbms-install-pre | Unpack Oracle RDBMS Binaries on the target server
-  when: inventory_hostname in groups['dbservers']
+- include_tasks: check_skip_install.yml
+  
+- name: db-rdbms-install-pre | Unpack Oracle RDBMS Software on the target server
+  when: inventory_hostname in groups['dbservers']  and not skip_install
   remote_user: "{{ root_user }}"
   become: yes
   become_user: "{{ oracle_user }}"
@@ -405,9 +406,8 @@
    - db_unpackdbsoftware
   ignore_errors: false   
 
-
-- name: db-rdbms-install-pre | Unpack Oracle Patch Binaries on the target server
-  when: inventory_hostname in groups['dbservers']
+- name: db-rdbms-install-pre | Unpack Oracle Patch Software on the target server
+  when: inventory_hostname in groups['dbservers']  and not skip_install
   remote_user: "{{ root_user }}"
   become: yes
   become_user: "{{ oracle_user }}"
@@ -426,17 +426,17 @@
   ignore_errors: false   
 
 
-- name: db-rdbms-install-pre | Remove copied Oracle Binaries from target database server to save space, just for lab env
-  when: inventory_hostname in groups['dbservers']  
-  file: 
-     path: "{{ stage_dir }}/{{ item }}"
-     state: absent
-  with_items:
-     - "{{ oracle_rdbms_binary }}"
-     - "{{ oracle_rdbms_patch_binary }}"
-  tags:
-   - db_binary
-  ignore_errors: false 
+#- name: db-rdbms-install-pre | Remove copied Oracle Software from target database server to save space, just for lab env
+#  when: inventory_hostname in groups['dbservers']  
+#  file: 
+#     path: "{{ stage_dir }}/{{ item }}"
+#     state: absent
+#  with_items:
+#     - "{{ oracle_rdbms_binary }}"
+#     - "{{ oracle_rdbms_patch_binary }}"
+#  tags:
+#   - db_binary
+#  ignore_errors: false 
 
 
 - name: db-rdbms-install-pre | Should you install Oracle RDBMS ?

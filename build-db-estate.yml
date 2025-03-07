@@ -26,7 +26,7 @@
       
       - name: skip play db-rdbms-install-pre if install_rdbms is false
         meta: end_play
-      when: install_rdbms is defined and not install_rdbms  
+      when: install_rdbms is not defined or not install_rdbms
       run_once: true  
   roles:
     - db-rdbms-install-pre
@@ -43,7 +43,7 @@
       
       - name: skip play db-rdbms-install if install_rdbms is false
         meta: end_play
-      when: install_rdbms is defined and not install_rdbms  
+      when: install_rdbms is not defined or not install_rdbms
       run_once: true    
   roles:
     - db-rdbms-install
@@ -61,7 +61,7 @@
       
       - name: skip play lsnr-create if create_listener is false
         meta: end_play
-      when: create_listener is defined and not create_listener  
+      when: create_listener is not defined or not create_listener
       run_once: true 
   roles:
     - lsnr-create
@@ -78,7 +78,7 @@
       
       - name: skip play db-create if create_db is false
         meta: end_play
-      when: create_db is defined and not create_db  
+      when: create_db is not defined or not create_db  
       run_once: true 
   roles:
     - db-create
@@ -95,7 +95,7 @@
       
       - name: skip play db-standby-create if create_standby_db is false
         meta: end_play
-      when: create_standby_db is defined and not create_standby_db  
+      when: create_standby_db is not defined or not create_standby_db    
       run_once: true 
   roles:    
     - db-standby-create
@@ -112,7 +112,7 @@
       
       - name: skip play client-install-pre if observer_install_client is false
         meta: end_play
-      when: observer_install_client is defined and not observer_install_client       
+      when: observer_install_client is not defined or not observer_install_client    
       run_once: true         
   roles:
     - client-install-pre
@@ -129,7 +129,7 @@
       
       - name: skip play client-install if observer_install_client is false
         meta: end_play
-      when: observer_install_client is defined and not observer_install_client       
+      when: observer_install_client is not defined or not observer_install_client    
       run_once: true         
   roles:
     - client-install
@@ -146,7 +146,7 @@
       
       - name: skip play db-dgbroker-config if configure_dgbroker is false
         meta: end_play
-      when: configure_dgbroker  is defined and not configure_dgbroker 
+      when: configure_dgbroker is not defined or not configure_dgbroker    
       run_once: true          
   roles:    
     - db-dgbroker-config 
@@ -163,12 +163,7 @@
       
       - name: skip play db-rman-config if configure_rman_property is false
         meta: end_play
-      when: configure_rman_property  is defined and not configure_rman_property    
+      when: configure_rman_property is not defined or not configure_rman_property            
       run_once: true         
   roles:
     - db-rman-config
-
-
-
-
-

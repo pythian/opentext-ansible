@@ -1,4 +1,7 @@
 ---
+
+- include_tasks: "../../db-rdbms-install-pre/tasks/check_skip_install.yml"
+
 - name: db-rdbms-install | display database software install message
   remote_user: "{{ root_user }}"
   debug:
@@ -18,23 +21,24 @@
   shell: "cd {{ oracle_home }}/OPatch; ./opatch version | awk '{print $3}' " #" | sed 's/\\.//g' | cut -c1-7 "
   register: get_opatch_version
 
+
 - set_fact:
     current_opatch_version: "{{ get_opatch_version.stdout }}"
-    new_opatch_version: "{{ oracle_opatch_version }}"
+    expected_opatch_version: "{{ oracle_opatch_version }}"
 
 
 - name: db-rdbms-install | display opatch patch readiness
   ansible.builtin.debug:
-   msg: "Current OPatch Version is {{ current_opatch_version }}, minimum required OPatch Version is {{ new_opatch_version }}."  
+   msg: "Current OPatch Version is {{ current_opatch_version }}, minimum required OPatch Version is {{ expected_opatch_version }}."  
 
 
 - name: db-rdbms-install | creating opatch backup    
   command: mv "{{ oracle_home }}/OPatch" "{{ oracle_home }}/OPatch_BKP_{{ansible_date_time.date}}_{{ansible_date_time.epoch}}"
-  when: current_opatch_version  is version(new_opatch_version, '<')
+  when: current_opatch_version  is version(expected_opatch_version, '<') and not skip_install
 
 
 - name: db-rdbms-install | Patch Oracle OPatch Binaries on the target server
-  when: current_opatch_version  is version(new_opatch_version, '<')
+  when: current_opatch_version  is version(expected_opatch_version, '<') and not skip_install
   remote_user: "{{ root_user }}"
   become: yes
   become_user: "{{ oracle_user }}"
@@ -56,12 +60,20 @@
   become_user: "{{ oracle_user }}"
   shell: "cd {{ oracle_home }}/OPatch; ./opatch version | awk '{print $3}' " #" | sed 's/\\.//g' | cut -c1-7 "
   register: get_opatch_version
-  when: current_opatch_version  is version(new_opatch_version, '<')
+  when: current_opatch_version  is version(expected_opatch_version, '<') and not skip_install
+
+- set_fact:
+    current_opatch_version: "{{ get_opatch_version.stdout }}"
 
 - name: db-rdbms-install | Display new  opatch version
   debug:
     msg: "Current OPatch Version: {{ get_opatch_version.stdout }}"
-  when: current_opatch_version  is version(new_opatch_version, '<')
+  when: current_opatch_version  is version(expected_opatch_version, '<') and not skip_install
+
+- name: db-rdbms-install | Stop play if OPatch version is outdated
+  fail:
+    msg: "Stopping playbook: OPatch version is still outdated ({{ get_opatch_version.stdout }} < {{ expected_opatch_version }})"
+  when: current_opatch_version is version(expected_opatch_version, '<')  and not skip_install 
 
 #######################OPatch Releated Ends Here #################################################  
 
@@ -69,7 +81,7 @@
 #######################Oracle RDBMS Install Releated Starts Here #################################################
 
 - name: db-rdbms-install | Setup Oracle Database Software silent response file
-  when: inventory_hostname in groups['dbservers']
+  when: inventory_hostname in groups['dbservers'] and not skip_install
   remote_user: "{{ root_user }}"
   become: yes
   become_user: "{{ oracle_user }}"
@@ -86,7 +98,7 @@
 
 
 - name: db-rdbms-install | Install Oracle Database Software with RU
-  when: install_rdbms and inventory_hostname in groups['dbservers'] and not installed_stat_result.stat.exists
+  when: install_rdbms and inventory_hostname in groups['dbservers'] and not installed_stat_result.stat.exists and not skip_install
   remote_user: "{{ root_user }}"
   become: yes
   become_user: "{{ oracle_user }}"
@@ -97,7 +109,7 @@
    - dbsoft_install
 
 - name: db-rdbms-install | Execute orainstroot.sh
-  when: install_rdbms and inventory_hostname in groups['dbservers'] and not installed_stat_result.stat.exists 
+  when: install_rdbms and inventory_hostname in groups['dbservers'] and not installed_stat_result.stat.exists  and not skip_install
   remote_user: "{{ root_user }}"
   shell: "{{ oracle_inventory }}/orainstRoot.sh" 
   ignore_errors: False
@@ -105,7 +117,7 @@
    - db_exeorainstroot
 
 - name: db-rdbms-install | Execute root.sh
-  when: install_rdbms and inventory_hostname in groups['dbservers'] and not installed_stat_result.stat.exists
+  when: install_rdbms and inventory_hostname in groups['dbservers'] and not installed_stat_result.stat.exists and not skip_install
   remote_user: "{{ root_user }}"
   shell: "{{ oracle_home }}/root.sh -silent"
   ignore_errors: False
@@ -127,7 +139,7 @@
   - { key: "olap", value: "{{ olap }}", object: "xsyeolap.o"  }
   - { key: "partitioning", value: "{{ partitioning }}", object: "kkpoban.o"  }
   - { key: "rat", value: "{{ rat }}", object: "kecwr.o"  } 
-  when: item.object != "none"
+  when: item.object != "none" and not skip_install
   changed_when: false  # Prevents Ansible from marking this task as "changed"
   failed_when: false  # Prevents failure if grep doesn't find the object
   tags:
@@ -142,6 +154,7 @@
   loop: "{{ check_result.results }}"
   loop_control:
     label: "{{ item.item.key }}"  # Prevents full item dump in output
+  when: not skip_install
 
 - name: db-rdbms-install | Enable or disable feature based on desired state
   become: yes
@@ -155,7 +168,7 @@
   loop: "{{ check_result.results }}"
   loop_control:
     label: "{{ item.item.key }}"  # Prevents Ansible from printing full item data    
-  when: install_rdbms and "item.stdout | int == 0 and item.item.value | int == 1 or item.stdout | int == 1 and item.item.value | int == 0"      
+  when: install_rdbms and "item.stdout | int == 0 and item.item.value | int == 1 or item.stdout | int == 1 and item.item.value | int == 0"   and not skip_install    
   changed_when: true
   register: feature_toggle_result
   no_log: false  # Keep logs minimal  
@@ -177,7 +190,7 @@
   - { key: "olap", value: "{{ olap }}", object: "xsyeolap.o"  }
   - { key: "partitioning", value: "{{ partitioning }}", object: "kkpoban.o"  }
   - { key: "rat", value: "{{ rat }}", object: "kecwr.o"  } 
-  when: item.object != "none"
+  when: item.object != "none" and not skip_install
   changed_when: false  # Prevents Ansible from marking this task as "changed"
   failed_when: false  # Prevents failure if grep doesn't find the object
   tags:
@@ -192,6 +205,7 @@
   loop: "{{ check_result.results }}"
   loop_control:
     label: "{{ item.item.key }}"  # Prevents full item dump in output
+  when: not skip_install  
 
 - name: db-rdbms-install | Create Installation status flag file
   copy:
@@ -199,7 +213,7 @@
     dest: "{{ oracle_installed_flagFile }}"
     force: false
     mode: 0444
-
+  when: not skip_install
 
 #######################Oracle RDBMS Install Releated Ends Here #################################################
 
