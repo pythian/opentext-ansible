@@ -1,16 +1,18 @@
 ###   ****** Begining of Database Servers ( Primary/Standby) Related Configuration  ******* #######
 
 #-- Control Flags in building the DB environment
-create_db:                        true #-- Set it to false to avoid creating Primary DB
-create_standby_db:                true #-- Set it to false to avoid creating Standby DB
-create_listener:                  true #-- Set it to false to avoid creating Listener
-install_rdbms:                    true #-- Set it to false to avoid Installing Oracle RDBMS
-observer_install_client:          true #-- Set it to false to avoid Installing Oracle Client
+create_db:                        false #-- Set it to false to avoid creating Primary DB
+create_standby_db:                false #-- Set it to false to avoid creating Standby DB
+create_listener:                  false #-- Set it to false to avoid creating Listener
+install_rdbms:                    false #-- Set it to false to avoid Installing Oracle RDBMS
+observer_install_client:          false #-- Set it to false to avoid Installing Oracle Client
 configure_dgbroker:               true #-- Set it to true to configure DG broker, Add DB to DG broker, Configure FSFO etc
-configure_rman_property:          true #-- Set it to true to configure rman properties
+fsfo_enabled:                     true #-- Set to true to configure FSFO
+configure_rman_property:          false #-- Set it to true to configure rman properties
+
 #-- Operating System Level Variables
 
-#-- Supported OS version 
+#-- Expected OS version 
 os_major_version:                "9"  
 #-- Minimum Memory required to install binary
 min_memory_in_mb:                5000 # 16384
@@ -63,7 +65,8 @@ oracle_opatch_version:           "12.2.0.1.45"
 oracle_rdbms_patch_binary:        "p37257886_190000_Linux-x86-64.zip"   
 #-- Directory in target server to unzip the patch binaries
 oracle_rdbms_patch_stage_dir:     "{{ stage_dir }}/37257886"
-oracle_oneoff_patch_stage_dir:    "{{ stage_dir }}/37257886"
+#-- One off patch, if it any has to be applied. Need to tweak db-rdbms-install role to apply one off patch while installing
+#-- oracle_oneoff_patch_stage_dir:    "{{ stage_dir }}/37257886"
 #-- Flag file name to avoid unzipping the binary multipletimes, incase had to rerun the play again
 #-- For e.g runInstaller is the file name that would be present after unzipping in the target directory
 oracle_rdbms_patch_flagFile:      "{{ stage_dir }}/37257886/README.html"
@@ -77,12 +80,12 @@ oracle_installed_flagFile:        "{{ oracle_home }}/install_ansible_flag.txt"
 
 #-- Listener Name and Port
 listener_name:                   "LISTENER_{{ database_unique_name }}"
-listener_port:                    1531
+listener_port:                    1521
 disable_firewall:                 true
 
 #-- dbca create database related
 #-- Database/Global name
-database_name:                    "demo" 
+database_name:                    "test" 
 #-- database_unique_name is specific to the host, so having them in host file
 
 #-- Directory location of data/redo/fra files
@@ -96,7 +99,7 @@ redologsize:                      50 # in Mb
 #-- New_Database.dbt allows customization
 oracle_template:                 "New_Database.dbt" 
 #-- Database Domain Name
-db_domain:                       "hub" 
+db_domain:                       "hub" ## "covisint.net"
 #-- Database Configuration Type, for opentext always use SI unless GI/RAC required
 #-- But this ansible play does not handle GI/RAC
 db_config_type:                  "SI"  ## Single
@@ -112,8 +115,8 @@ pdb_prefix:
 charset:                          AL32UTF8
 ncharset:                         AL16UTF16
 #-- SYS/SYSTEM User credential when creating database
-systemPassword:                   "abcd"
-sysPassword:                      "abcd"
+systemPassword:                   "hACtt0YlMAiAsMnh"
+sysPassword:                      "hACtt0XlMAiAsMnh"
 
 
 #-- Database Components to configure when creating database
@@ -145,9 +148,10 @@ recoveryareasize:                 10240
 dg_broker_start:                  true 
 #-- standby_file_management parameter,  it is ideal to leave it as auto
 standby_file_management:          "auto"
+#-- Server Manageability Packs (DIAGNOSTIC pack) related
+control_management_pack_access:   "DIAGNOSTIC+TUNING"
 
 #-- Fast Start Failover Related
-fsfo_enabled:                     true  ## Set to true to configure FSFO
 fsfo_protection_mode:             "MAXAVAILABILITY"
 
 #-- Operating System Level Packages to be installed/crosschecked
@@ -243,7 +247,8 @@ observer_oracle_opatch_version:           "12.2.0.1.45"
 observer_oracle_patch_binary:        "p37260974_190000_Linux-x86-64.zip"   ##19.26
 #-- Directory in target server to unzip the patch binaries
 observer_oracle_patch_stage_dir:     "{{ observer_stage_dir }}/37260974"
-observer_oracle_oneoff_patch_stage_dir:    "{{ observer_stage_dir }}/37260974"
+#-- One off patch, if it any has to be applied. Need to tweak db-rdbms-install role to apply one off patch while installing
+#-- observer_oracle_oneoff_patch_stage_dir:    "{{ observer_stage_dir }}/37260974"
 #-- Flag file name to avoid unzipping the binary multipletimes, incase had to rerun the play again
 #-- For e.g README.html is the file name that would be present after unzipping in the target directory
 observer_oracle_patch_flagFile:      "{{ observer_stage_dir }}/37260974/README.html"
